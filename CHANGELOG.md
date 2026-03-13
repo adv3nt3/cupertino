@@ -17,6 +17,24 @@
 
 ---
 
+## 0.10.0 (2026-03-13)
+
+### Added
+- Framework synonyms: search using common alternate names (e.g., "nfc" → CoreNFC, "bluetooth" → CoreBluetooth, "shareplay" → GroupActivities)
+- Seed framework discovery from Apple's technologies.json for complete coverage
+- Agent skill for stateless CLI usage (#167, thanks @tijs)
+- Database v0.9.0: 320,771 documents across 443 frameworks (+18k docs, +136 frameworks)
+
+### Changed
+- Case-insensitive framework matching across all search functions
+- Reduced default request delay from 0.5s to 0.05s for faster crawling
+
+### Fixed
+- Crawler session resume now validates startURL before resuming
+- Case-insensitive URL prefix matching in shouldVisit
+- Link enqueue before skip check — incremental re-crawls now discover new child pages
+- Case-insensitive framework queries in searchByKind and searchSampleCode
+
 ## 0.9.0 (2025-12-31)
 
 ### Changed
