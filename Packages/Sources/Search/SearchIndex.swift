@@ -822,7 +822,7 @@ extension Search {
             sqlite3_bind_text(statement, 1, (query as NSString).utf8String, -1, nil)
 
             if let framework {
-                sqlite3_bind_text(statement, 2, (framework as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(statement, 2, (framework.lowercased() as NSString).utf8String, -1, nil)
                 sqlite3_bind_int(statement, 3, Int32(limit))
             } else {
                 sqlite3_bind_int(statement, 2, Int32(limit))
@@ -1611,7 +1611,7 @@ extension Search {
 
             var paramIndex: Int32 = 2
             if let framework {
-                sqlite3_bind_text(statement, paramIndex, (framework as NSString).utf8String, -1, nil)
+                sqlite3_bind_text(statement, paramIndex, (framework.lowercased() as NSString).utf8String, -1, nil)
                 paramIndex += 1
             }
             sqlite3_bind_int(statement, paramIndex, Int32(limit))

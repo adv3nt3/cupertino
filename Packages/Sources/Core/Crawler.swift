@@ -277,6 +277,14 @@ extension Core {
                 filePath: jsonFilePath
             )
 
+            // Enqueue discovered links before any early returns
+            // so child pages are always discovered even when content is unchanged
+            if depth < configuration.maxDepth {
+                for link in links where shouldVisit(url: link) {
+                    queue.append((url: link, depth: depth + 1))
+                }
+            }
+
             if !shouldRecrawl {
                 logInfo("   ⏩ No changes detected, skipping")
                 await state.updateStatistics { $0.skippedPages += 1 }
@@ -320,13 +328,6 @@ extension Core {
             }
 
             await state.updateStatistics { $0.totalPages += 1 }
-
-            // Enqueue discovered links
-            if depth < configuration.maxDepth {
-                for link in links where shouldVisit(url: link) {
-                    queue.append((url: link, depth: depth + 1))
-                }
-            }
 
             // Notify progress
             if let onProgress {
