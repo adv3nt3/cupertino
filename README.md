@@ -314,9 +314,9 @@ npx openskills install mihaelamj/cupertino --universal
 
 **Option B: Install as a Claude Code Plugin**
 
-Add the cupertino marketplace to Claude Code:
-```bash
-claude /plugin marketplace add https://github.com/mihaelamj/cupertino.git
+Inside a Claude Code session, add the cupertino marketplace:
+```
+/plugin marketplace add mihaelamj/cupertino
 ```
 
 Then enable the plugin from the marketplace.
