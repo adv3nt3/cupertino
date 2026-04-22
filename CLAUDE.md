@@ -1,6 +1,8 @@
-# Cupertino — current focus
+# Cupertino
 
-Active roadmap: **[#183 — bugs → recrawl → vector → tutor](https://github.com/mihaelamj/cupertino/issues/183)**
+## Active focus
+
+[#183 — bugs → recrawl → vector → tutor](https://github.com/mihaelamj/cupertino/issues/183) (Phase 1: close 6 open bugs)
 
 ## Phase 1 (now): close all open bugs
 
