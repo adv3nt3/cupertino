@@ -77,6 +77,13 @@ struct FetchCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Use fast mode (higher concurrency, shorter timeout) for availability fetch")
     var fast: Bool = false
 
+    @Flag(
+        name: .long,
+        inversion: .prefixedNo,
+        help: "Walk Package.resolved transitively when fetching package docs so dependencies of seed packages are indexed too"
+    )
+    var recurse: Bool = true
+
     mutating func run() async throws {
         logStartMessage()
 
@@ -413,7 +420,7 @@ struct FetchCommand: AsyncParsableCommand {
         }
 
         // Convert to PackageReference format
-        let packageRefs = priorityPackages.compactMap { pkg -> PackageReference? in
+        let seedRefs = priorityPackages.compactMap { pkg -> PackageReference? in
             // Extract owner from URL if not provided
             let owner: String
             if let explicitOwner = pkg.owner, !explicitOwner.isEmpty {
@@ -441,7 +448,28 @@ struct FetchCommand: AsyncParsableCommand {
             )
         }
 
-        Logging.ConsoleLogger.info("📦 Downloading documentation for \(packageRefs.count) priority packages...")
+        let packageRefs: [PackageReference]
+        if recurse {
+            Logging.ConsoleLogger.info("🔗 Resolving transitive dependencies for \(seedRefs.count) seed packages...")
+            let resolver = Core.PackageDependencyResolver()
+            let (resolved, resolverStats) = await resolver.resolve(seeds: seedRefs) { name, done, total in
+                if done == 1 || done % 10 == 0 || done == total {
+                    Logging.ConsoleLogger.output("   Resolving: \(done)/\(total) (\(name))")
+                }
+            }
+            packageRefs = resolved
+            Logging.ConsoleLogger.info("   Seeds: \(resolverStats.seedCount)")
+            Logging.ConsoleLogger.info("   Discovered via dependencies: \(resolverStats.discoveredCount)")
+            Logging.ConsoleLogger.info("   Skipped (non-GitHub): \(resolverStats.skippedNonGitHub)")
+            Logging.ConsoleLogger.info("   Missing Package.resolved: \(resolverStats.missingManifest)")
+            Logging.ConsoleLogger.info("   Malformed Package.resolved: \(resolverStats.malformedManifest)")
+            Logging.ConsoleLogger.info("   Resolver duration: \(Int(resolverStats.duration))s")
+        } else {
+            packageRefs = seedRefs
+            Logging.ConsoleLogger.info("🔗 Skipping dependency resolution (--no-recurse)")
+        }
+
+        Logging.ConsoleLogger.info("📦 Downloading documentation for \(packageRefs.count) packages...")
         Logging.ConsoleLogger.info("   Output: \(outputURL.path)\n")
 
         let downloader = Core.PackageDocumentationDownloader(outputDirectory: outputURL)
