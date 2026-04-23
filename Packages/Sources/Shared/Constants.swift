@@ -54,6 +54,10 @@ extension Shared {
             /// Package source + docs FTS index (separate from search.db; hidden feature)
             public static let packagesIndexDatabase = "packages.db"
 
+            /// Stores the `databaseVersion` that was active when `setup` last succeeded.
+            /// Read on subsequent setup invocations to distinguish stale DBs from current ones (#168).
+            public static let setupVersionFile = ".setup-version"
+
             // MARK: Package Data Files
 
             /// Swift packages with GitHub stars data

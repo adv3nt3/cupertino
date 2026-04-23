@@ -15,8 +15,8 @@ struct SetupCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Base directory for databases")
     var baseDir: String?
 
-    @Flag(name: .long, help: "Force re-download even if files exist")
-    var force: Bool = false
+    @Flag(name: .long, help: "Skip the download and keep whatever databases are already installed")
+    var keepExisting: Bool = false
 
     // MARK: - Constants
 
@@ -51,23 +51,37 @@ struct SetupCommand: AsyncParsableCommand {
 
         let searchDBURL = baseURL.appendingPathComponent(Self.searchDBFilename)
         let samplesDBURL = baseURL.appendingPathComponent(Self.samplesDBFilename)
+        let currentVersion = Shared.Constants.App.databaseVersion
+        let installedVersion = Self.readInstalledVersion(in: baseURL)
 
         // Check if both files exist
         let searchExists = FileManager.default.fileExists(atPath: searchDBURL.path)
         let samplesExists = FileManager.default.fileExists(atPath: samplesDBURL.path)
 
-        if !force, searchExists, samplesExists {
-            Logging.ConsoleLogger.info("✅ Databases already exist")
+        let status = Self.setupStatus(
+            searchDBExists: searchExists,
+            samplesDBExists: samplesExists,
+            installedVersion: installedVersion,
+            currentVersion: currentVersion
+        )
+
+        // --keep-existing: honour whatever is already on disk. Mirrors the old default
+        // behaviour; opt-in now since most users running `setup` actually want the latest.
+        if keepExisting, searchExists, samplesExists {
+            Logging.ConsoleLogger.info("✅ Databases already exist (keeping them, per --keep-existing)")
             Logging.ConsoleLogger.info("   Documentation: \(searchDBURL.path)")
             Logging.ConsoleLogger.info("   Sample code:   \(samplesDBURL.path)")
-            Logging.ConsoleLogger.info("\n💡 Use --force to overwrite with latest version")
+            Self.printVersionStatus(status)
             Logging.ConsoleLogger.info("💡 Start the server with: cupertino serve")
             return
         }
 
-        // Warn about overwriting
-        if force, searchExists || samplesExists {
-            Logging.ConsoleLogger.info("⚠️  Existing databases will be overwritten\n")
+        // Default path: download. Explain whether this is a fresh install, a refresh
+        // of the same version, or an upgrade, so the user knows what they're paying for.
+        if searchExists || samplesExists {
+            Self.printVersionStatus(status, inForceMode: true)
+        } else {
+            Logging.ConsoleLogger.info("ℹ️  No databases installed. Downloading v\(currentVersion).\n")
         }
 
         // Download and extract zip
@@ -93,12 +107,91 @@ struct SetupCommand: AsyncParsableCommand {
             throw SetupError.missingFile(Self.samplesDBFilename)
         }
 
+        // Record the version that was just installed (#168) so future setup runs
+        // can distinguish stale DBs from current ones. Non-fatal if write fails;
+        // the file is an optimization, not a correctness requirement.
+        try? Self.writeInstalledVersion(currentVersion, in: baseURL)
+
         // Done
         Logging.ConsoleLogger.output("")
         Logging.ConsoleLogger.info("✅ Setup complete!")
         Logging.ConsoleLogger.info("   Documentation: \(searchDBURL.path)")
         Logging.ConsoleLogger.info("   Sample code:   \(samplesDBURL.path)")
+        Logging.ConsoleLogger.info("   Version:       \(currentVersion)")
         Logging.ConsoleLogger.info("\n💡 Start the server with: cupertino serve")
+    }
+
+    // MARK: - Version tracking (#168)
+
+    /// Status of the installed databases relative to the binary's expected version.
+    /// Pure enum for direct unit testing.
+    enum SetupStatus: Equatable {
+        case missing
+        case current(version: String)
+        case stale(installed: String, current: String)
+        case unknown(current: String)  // DBs exist but no version file (legacy install)
+    }
+
+    static func setupStatus(
+        searchDBExists: Bool,
+        samplesDBExists: Bool,
+        installedVersion: String?,
+        currentVersion: String
+    ) -> SetupStatus {
+        guard searchDBExists, samplesDBExists else { return .missing }
+        guard let installed = installedVersion else { return .unknown(current: currentVersion) }
+        if installed == currentVersion {
+            return .current(version: currentVersion)
+        }
+        return .stale(installed: installed, current: currentVersion)
+    }
+
+    static func readInstalledVersion(in baseDir: URL) -> String? {
+        let url = baseDir.appendingPathComponent(Shared.Constants.FileName.setupVersionFile)
+        guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    static func writeInstalledVersion(_ version: String, in baseDir: URL) throws {
+        let url = baseDir.appendingPathComponent(Shared.Constants.FileName.setupVersionFile)
+        try version.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// Prints the version-state for the installed DBs. `isDownloading` is true on the
+    /// default path (about to replace what's there) and false on the --keep-existing path.
+    private static func printVersionStatus(_ status: SetupStatus, inForceMode isDownloading: Bool = false) {
+        switch status {
+        case .missing:
+            return
+        case .current(let version):
+            if isDownloading {
+                Logging.ConsoleLogger.info("ℹ️  Currently installed: v\(version) (same as the binary's expected version).")
+                Logging.ConsoleLogger.info("   Re-downloading v\(version). This is a refresh, not an upgrade.")
+                Logging.ConsoleLogger.info("   Tip: pass --keep-existing to skip this download.\n")
+            } else {
+                Logging.ConsoleLogger.info("   Version:       v\(version) — current")
+                Logging.ConsoleLogger.info("\n💡 Databases are up to date for this cupertino version.")
+                Logging.ConsoleLogger.info("💡 Upgrade cupertino itself (brew upgrade cupertino, or rerun install.sh) to get newer DBs.")
+            }
+        case .stale(let installed, let current):
+            if isDownloading {
+                Logging.ConsoleLogger.info("⬆️  Upgrading databases: v\(installed) → v\(current).\n")
+            } else {
+                Logging.ConsoleLogger.info("   Version:       v\(installed) — stale (this cupertino expects v\(current))")
+                Logging.ConsoleLogger.info("\n⚠️  Databases are stale. Drop --keep-existing and rerun `cupertino setup` to upgrade.")
+                Logging.ConsoleLogger.info("💡 Start the server with: cupertino serve (will use stale DBs until upgraded)")
+            }
+        case .unknown(let current):
+            if isDownloading {
+                Logging.ConsoleLogger.info("ℹ️  Databases exist but their version is unknown (legacy install).")
+                Logging.ConsoleLogger.info("   Downloading v\(current) and stamping the version file.\n")
+            } else {
+                Logging.ConsoleLogger.info("   Version:       unknown (legacy install, no version stamp)")
+                Logging.ConsoleLogger.info("\n💡 Drop --keep-existing and rerun `cupertino setup` to refresh and stamp the version.")
+                Logging.ConsoleLogger.info("💡 Start the server with: cupertino serve")
+            }
+        }
     }
 
     // MARK: - Extract

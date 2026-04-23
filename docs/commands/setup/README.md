@@ -24,7 +24,17 @@ This is the **fastest way to get started** with Cupertino.
 ## Options
 
 - `--base-dir` - Custom directory for databases (default: `~/.cupertino/`)
-- `--force` - Re-download even if files exist
+- `--keep-existing` - Skip the download and use whatever databases are already installed
+
+## Default behaviour
+
+`cupertino setup` always downloads the release matching the binary's expected `databaseVersion`. On each successful download it stamps a `.setup-version` file next to the databases so subsequent invocations can show:
+
+- the version currently installed,
+- whether it's current, stale, or unknown relative to the binary,
+- whether a re-run is a no-op refresh or a real upgrade.
+
+If you upgrade cupertino itself (via `brew upgrade cupertino` or the install script) and the new binary expects a newer `databaseVersion`, rerunning `cupertino setup` upgrades the databases in place.
 
 ## Examples
 
@@ -40,10 +50,10 @@ cupertino setup
 cupertino setup --base-dir ~/my-docs
 ```
 
-### Force Re-download
+### Keep Existing Databases
 
 ```bash
-cupertino setup --force
+cupertino setup --keep-existing
 ```
 
 ## Output
