@@ -396,67 +396,135 @@ public final class SampleCodeDownloader {
         logInfo("")
 
         #if os(macOS)
-        if visibleBrowser {
-            // Fix for #6: a bare CLI process is created with activation policy
-            // `.prohibited`, which makes `NSWindow.makeKeyAndOrderFront` a silent
-            // no-op — the user sees no window and the flag appears to do nothing.
-            // Flip the process so the auth window actually appears (transient
-            // Dock icon for the duration of the flow is acceptable).
-            //
-            // Use `NSApplication.shared` directly rather than `NSApp`: in a bare
-            // Swift CLI tool, `NSApp` is an implicitly-unwrapped nil until
-            // something first accesses `NSApplication.shared`, so the old
-            // `NSApp.setActivationPolicy(...)` crashed before it could help.
-            NSApplication.shared.setActivationPolicy(Self.authFlowActivationPolicy)
+        guard visibleBrowser else { return }
 
-            // Create webview with proper frame
-            let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1024, height: 768))
+        // Fix for #6: a bare CLI process is created with activation policy
+        // `.prohibited`, which makes `NSWindow.makeKeyAndOrderFront` a silent
+        // no-op. Flip to `.regular` so the auth window actually appears
+        // (transient Dock icon is acceptable), then flip back on exit.
+        //
+        // Use `NSApplication.shared` rather than `NSApp`: in a bare Swift CLI,
+        // `NSApp` is an implicitly-unwrapped nil until `.shared` materializes it.
+        NSApplication.shared.setActivationPolicy(Self.authFlowActivationPolicy)
+        defer { NSApplication.shared.setActivationPolicy(.prohibited) }
 
-            // Load saved cookies first
-            await loadCookies(into: webView)
+        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1024, height: 768))
+        await loadCookies(into: webView)
 
-            // Create and show window
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 1024, height: 768),
-                styleMask: [.titled, .closable, .resizable, .miniaturizable],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = "Apple Developer Sign In"
-            window.contentView = webView
-            window.center()
-            window.isReleasedWhenClosed = false // Important: keep window alive
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1024, height: 768),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Apple Developer Sign In"
+        window.contentView = webView
+        window.center()
+        window.isReleasedWhenClosed = false
 
-            // Load Apple Developer login page
-            let loginURL = URL(string: Shared.Constants.BaseURL.appleDeveloperAccount)!
-            webView.load(URLRequest(url: loginURL))
+        let loginURL = URL(string: Shared.Constants.BaseURL.appleDeveloperAccount)!
+        webView.load(URLRequest(url: loginURL))
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
 
-            // Show window
-            window.makeKeyAndOrderFront(nil)
+        logInfo("✅ Browser window opened")
+        logInfo("   Sign in to your Apple Developer account")
+        if Self.isInteractiveStdin() {
+            logInfo("   The window closes automatically when sign-in is detected.")
+            logInfo("   (Or close the window / press Enter here to finish.)")
+        } else {
+            logInfo("   The window closes automatically when sign-in is detected.")
+            logInfo("   (Or close the window to finish — stdin is not a TTY.)")
+        }
 
-            // Activate app to bring window to front. Safe now that the shared
-            // app was materialized above.
-            NSApplication.shared.activate(ignoringOtherApps: true)
+        let outcome = await Self.awaitAuthOutcome(webView: webView, window: window)
 
-            logInfo("✅ Browser window opened")
-            logInfo("   Sign in to your Apple Developer account")
-            logInfo("   Press Enter when you're done signing in...")
+        await saveCookies(from: webView)
+        window.close()
 
-            // Wait for the user to press Enter after signing in.
-            // Note: the run loop pumps via WKWebView's own timer sources on
-            // MainActor; the detached task keeps readLine off the main thread.
-            await Task.detached {
-                _ = readLine()
-            }.value
-
-            // Save cookies
-            await saveCookies(from: webView)
-
-            window.close()
-            logInfo("✅ Authentication complete, cookies saved")
+        switch outcome {
+        case .autoDetected:
+            logInfo("✅ Sign-in detected automatically, cookies saved.")
+        case .userConfirmed:
+            logInfo("✅ Authentication complete (Enter), cookies saved.")
+        case .userClosedWindow:
+            logInfo("⚠️  Auth window closed before sign-in was detected. Any cookies present were saved.")
         }
         #endif
     }
+
+    // MARK: - Auth flow coordination (#6 follow-up)
+
+    /// Terminal state of an interactive auth session.
+    enum AuthOutcome: Sendable {
+        /// Target session cookie appeared without user input.
+        case autoDetected
+        /// User pressed Enter at the prompt.
+        case userConfirmed
+        /// User closed the auth window.
+        case userClosedWindow
+    }
+
+    /// Names of Apple session cookies whose presence on an `*.apple.com` domain
+    /// we treat as "the user has completed sign-in". Exposed for tests.
+    nonisolated static let appleSessionCookieNames: Set<String> = ["myacinfo"]
+
+    /// Pure predicate: does this cookie set contain evidence of an Apple sign-in?
+    nonisolated static func containsAppleSessionCookie(_ cookies: [HTTPCookie]) -> Bool {
+        cookies.contains { cookie in
+            cookie.domain.lowercased().contains("apple.com")
+                && appleSessionCookieNames.contains(cookie.name)
+        }
+    }
+
+    /// Wraps `isatty(fileno(stdin))` so the TTY check is mockable via `_isInteractiveStdinOverride`.
+    nonisolated static func isInteractiveStdin() -> Bool {
+        if let override = _isInteractiveStdinOverride { return override }
+        return isatty(fileno(stdin)) != 0
+    }
+
+    /// Test seam for forcing the TTY check result.
+    nonisolated(unsafe) static var _isInteractiveStdinOverride: Bool?
+
+    #if os(macOS)
+    /// Races three signals: (1) WebView navigation reports an Apple session
+    /// cookie present, (2) the user presses Enter at the prompt, (3) the user
+    /// closes the auth window. Returns whichever fires first.
+    @MainActor
+    private static func awaitAuthOutcome(webView: WKWebView, window: NSWindow) async -> AuthOutcome {
+        await withCheckedContinuation { (continuation: CheckedContinuation<AuthOutcome, Never>) in
+            let coordinator = AuthFlowCoordinator { outcome in
+                continuation.resume(returning: outcome)
+            }
+            webView.navigationDelegate = coordinator
+
+            // (2) Terminal Enter — only if stdin is interactive.
+            if isInteractiveStdin() {
+                Task.detached {
+                    if readLine() != nil {
+                        await MainActor.run { coordinator.userPressedEnter() }
+                    }
+                    // readLine() returning nil means EOF / stdin closed; auto-detect
+                    // and window-close are still viable, so do nothing here.
+                }
+            }
+
+            // (3) Window close.
+            let token = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: window,
+                queue: .main
+            ) { _ in
+                Task { @MainActor in coordinator.userClosedWindow() }
+            }
+            coordinator.onFinish = { [weak coordinator] in
+                NotificationCenter.default.removeObserver(token)
+                webView.navigationDelegate = nil
+                _ = coordinator  // silence warning
+            }
+        }
+    }
+    #endif
 
     private func loadCookies(into webView: WKWebView) async {
         guard FileManager.default.fileExists(atPath: cookiesPath.path) else {
@@ -634,3 +702,47 @@ struct CookieData: Codable {
     let expiresDate: Date?
     let isSecure: Bool
 }
+
+// MARK: - Auth Flow Coordinator (#6 follow-up)
+
+#if os(macOS)
+/// Owns the WKNavigationDelegate plus the Enter / window-close bookkeeping for
+/// the auth flow. Resumes a continuation with the first outcome it sees.
+/// Subsequent signals are dropped (idempotent).
+@MainActor
+private final class AuthFlowCoordinator: NSObject, WKNavigationDelegate {
+    private let onComplete: (SampleCodeDownloader.AuthOutcome) -> Void
+    private var completed = false
+    /// Called exactly once, when the coordinator finishes, to let the caller
+    /// tear down the notification observer and nil out the webView delegate.
+    var onFinish: (() -> Void)?
+
+    init(onComplete: @escaping (SampleCodeDownloader.AuthOutcome) -> Void) {
+        self.onComplete = onComplete
+    }
+
+    // MARK: WKNavigationDelegate
+
+    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        Task { @MainActor [weak self] in
+            let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
+            if SampleCodeDownloader.containsAppleSessionCookie(cookies) {
+                self?.complete(.autoDetected)
+            }
+        }
+    }
+
+    // MARK: Explicit signals
+
+    func userPressedEnter() { complete(.userConfirmed) }
+    func userClosedWindow() { complete(.userClosedWindow) }
+
+    private func complete(_ outcome: SampleCodeDownloader.AuthOutcome) {
+        guard !completed else { return }
+        completed = true
+        onComplete(outcome)
+        onFinish?()
+        onFinish = nil
+    }
+}
+#endif
