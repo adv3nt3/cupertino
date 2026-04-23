@@ -3,6 +3,7 @@ import Availability
 import Core
 import Foundation
 import Logging
+import Search
 import Shared
 
 // MARK: - Fetch Command
@@ -462,16 +463,14 @@ struct FetchCommand: AsyncParsableCommand {
             .appendingPathComponent(".cache")
             .appendingPathComponent(Shared.Constants.FileName.canonicalOwnersCache)
 
-        let packageRefs: [PackageReference]
+        let resolvedPackages: [Core.ResolvedPackage]
         if recurse {
             if !refresh,
                let cached = Core.ResolvedPackagesStore.load(from: resolvedStoreURL),
                cached.seedChecksum == seedChecksum
             {
                 Logging.ConsoleLogger.info("🔗 Using cached closure from resolved-packages.json (\(cached.packages.count) packages, generated \(cached.generatedAt))")
-                packageRefs = cached.packages.map { pkg in
-                    PackageReference(owner: pkg.owner, repo: pkg.repo, url: pkg.url, priority: pkg.priority)
-                }
+                resolvedPackages = cached.packages
             } else {
                 if refresh {
                     Logging.ConsoleLogger.info("🔗 --refresh: discarding cached closure, re-walking dependency graphs...")
@@ -497,9 +496,7 @@ struct FetchCommand: AsyncParsableCommand {
                         Logging.ConsoleLogger.output("   Resolving: \(done)/\(total) (\(name))")
                     }
                 }
-                packageRefs = resolved.map { pkg in
-                    PackageReference(owner: pkg.owner, repo: pkg.repo, url: pkg.url, priority: pkg.priority)
-                }
+                resolvedPackages = resolved
                 Logging.ConsoleLogger.info("   Seeds: \(resolverStats.seedCount)")
                 Logging.ConsoleLogger.info("   Discovered via dependencies: \(resolverStats.discoveredCount)")
                 Logging.ConsoleLogger.info("   Excluded: \(resolverStats.excludedCount)")
@@ -522,35 +519,74 @@ struct FetchCommand: AsyncParsableCommand {
                 }
             }
         } else {
-            packageRefs = seedRefs
+            resolvedPackages = seedRefs.map { ref in
+                Core.ResolvedPackage(
+                    owner: ref.owner,
+                    repo: ref.repo,
+                    url: ref.url,
+                    priority: ref.priority,
+                    parents: ["\(ref.owner.lowercased())/\(ref.repo.lowercased())"]
+                )
+            }
             Logging.ConsoleLogger.info("🔗 Skipping dependency resolution (--no-recurse)")
             if !exclusions.isEmpty {
                 Logging.ConsoleLogger.info("   Exclusion list ignored while --no-recurse is set")
             }
         }
 
-        Logging.ConsoleLogger.info("📦 Downloading documentation for \(packageRefs.count) packages...")
-        Logging.ConsoleLogger.info("   Output: \(outputURL.path)\n")
+        Logging.ConsoleLogger.info("📦 Fetching archives + indexing \(resolvedPackages.count) packages into \(Shared.Constants.defaultPackagesDatabase.path)...")
 
-        let downloader = Core.PackageDocumentationDownloader(outputDirectory: outputURL)
-
-        let stats = try await downloader.download(packages: packageRefs) { progress in
-            let percent = String(format: "%.1f", progress.percentage)
-            Logging.ConsoleLogger.output("   Progress: \(percent)% - \(progress.currentPackage)")
+        let extractor = Core.PackageArchiveExtractor()
+        let index = try await Search.PackageIndex()
+        defer {
+            Task { await index.disconnect() }
         }
 
+        let startedAt = Date()
+        var stats = PackageDownloadStatistics(
+            totalPackages: resolvedPackages.count,
+            startTime: startedAt
+        )
+        for (i, pkg) in resolvedPackages.enumerated() {
+            let label = "\(pkg.owner)/\(pkg.repo)"
+            do {
+                let extraction = try await extractor.fetchAndExtract(owner: pkg.owner, repo: pkg.repo)
+                let result = try await index.index(resolved: pkg, extraction: extraction)
+                stats.newPackages += 1
+                stats.totalFilesSaved += result.filesIndexed
+                stats.totalBytesSaved += result.bytesIndexed
+                let kb = result.bytesIndexed / 1024
+                Logging.ConsoleLogger.info("  ✅ \(label) — \(result.filesIndexed) files, \(kb) KB")
+            } catch Core.PackageArchiveExtractor.ExtractError.tarballNotFound {
+                stats.errors += 1
+                Logging.ConsoleLogger.error("  ✗ \(label) — archive not found on any ref")
+            } catch Core.PackageArchiveExtractor.ExtractError.tarballTooLarge(let bytes) {
+                stats.errors += 1
+                Logging.ConsoleLogger.error("  ✗ \(label) — archive too large (\(bytes / 1024 / 1024) MB)")
+            } catch {
+                stats.errors += 1
+                Logging.ConsoleLogger.error("  ✗ \(label) — \(error.localizedDescription)")
+            }
+
+            if (i + 1) % Shared.Constants.Interval.progressLogEvery == 0 || i + 1 == resolvedPackages.count {
+                let percent = Double(i + 1) / Double(resolvedPackages.count) * 100
+                Logging.ConsoleLogger.output(String(format: "📊 Progress: %.1f%% (%d/%d)", percent, i + 1, resolvedPackages.count))
+            }
+        }
+        stats.endTime = Date()
+
+        let summary = try await index.summary()
         Logging.ConsoleLogger.output("")
-        Logging.ConsoleLogger.info("✅ Download completed!")
-        Logging.ConsoleLogger.info("   Total packages: \(stats.totalPackages)")
-        Logging.ConsoleLogger.info("   New packages: \(stats.newPackages)")
-        Logging.ConsoleLogger.info("   Updated packages: \(stats.updatedPackages)")
-        Logging.ConsoleLogger.info("   Files saved: \(stats.totalFilesSaved)")
-        Logging.ConsoleLogger.info("   Bytes saved: \(stats.totalBytesSaved / 1024) KB")
-        Logging.ConsoleLogger.info("   Errors: \(stats.errors)")
+        Logging.ConsoleLogger.info("✅ Indexing completed!")
+        Logging.ConsoleLogger.info("   Packages in index: \(summary.packageCount)")
+        Logging.ConsoleLogger.info("   Files in index: \(summary.fileCount)")
+        Logging.ConsoleLogger.info("   Bytes in index: \(summary.bytesIndexed / 1024) KB")
+        Logging.ConsoleLogger.info("   Errors during this run: \(stats.errors)")
         if let duration = stats.duration {
             Logging.ConsoleLogger.info("   Duration: \(Int(duration))s")
         }
-        Logging.ConsoleLogger.info("\n📁 Output: \(outputURL.path)/")
+        Logging.ConsoleLogger.info("\n📁 Index: \(Shared.Constants.defaultPackagesDatabase.path)")
+        _ = outputURL
     }
 
     private func runCodeFetch() async throws {

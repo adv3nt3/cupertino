@@ -51,6 +51,9 @@ extension Shared {
             /// Samples database file
             public static let samplesDatabase = "samples.db"
 
+            /// Package source + docs FTS index (separate from search.db; hidden feature)
+            public static let packagesIndexDatabase = "packages.db"
+
             // MARK: Package Data Files
 
             /// Swift packages with GitHub stars data
@@ -147,6 +150,11 @@ extension Shared {
         /// Default search database: ~/.cupertino/search.db
         public static var defaultSearchDatabase: URL {
             defaultBaseDirectory.appendingPathComponent(FileName.searchDatabase)
+        }
+
+        /// Default package-index database: ~/.cupertino/packages.db
+        public static var defaultPackagesDatabase: URL {
+            defaultBaseDirectory.appendingPathComponent(FileName.packagesIndexDatabase)
         }
 
         // MARK: - Application Info

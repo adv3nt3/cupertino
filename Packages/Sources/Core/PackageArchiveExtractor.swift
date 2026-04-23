@@ -3,17 +3,17 @@ import Shared
 
 extension Core {
     /// Fetches a repo's source tarball from `codeload.github.com/<owner>/<repo>/tar.gz/<ref>`
-    /// and extracts the subset of files useful for "how do I use this package":
-    /// README, CHANGELOG, LICENSE, Package.swift, all markdown and DocC contents, all
-    /// Sources/ and Tests/ Swift files, all Examples/Demo directories. Binary assets,
-    /// CI metadata, and build artefacts are pruned post-extract.
+    /// and returns its text content as `[ExtractedFile]` in memory. The caller (the
+    /// indexer) is expected to consume the list directly into SQLite; nothing is
+    /// written to the user's filesystem.
     ///
     /// Uses `/usr/bin/tar` via a subprocess so we don't drag a Swift tar implementation
-    /// into the dependency graph; macOS's bsdtar reads `.tar.gz` directly.
+    /// into the dependency graph; macOS's bsdtar reads `.tar.gz` directly. The scratch
+    /// directory used for extraction is wiped before returning.
     public actor PackageArchiveExtractor {
         public struct Result: Sendable {
             public let branch: String
-            public let savedFiles: [String]
+            public let files: [ExtractedFile]
             public let totalBytes: Int64
             public let tarballBytes: Int
         }
@@ -40,13 +40,12 @@ extension Core {
             self.maxTarballBytes = maxTarballBytes
         }
 
-        /// Download + extract a package archive into `destination`. The destination
-        /// directory is wiped before extraction so re-runs produce a clean tree
-        /// (no stale files from a previous layout).
+        /// Download + extract a package archive and return its classified text
+        /// files. Nothing is written to the user's long-lived filesystem — the
+        /// extraction is into a temp scratch dir that's deleted before returning.
         public func fetchAndExtract(
             owner: String,
-            repo: String,
-            destination: URL
+            repo: String
         ) async throws -> Result {
             for ref in candidateRefs {
                 switch await downloadTarball(owner: owner, repo: repo, ref: ref) {
@@ -54,11 +53,7 @@ extension Core {
                     if data.count > maxTarballBytes {
                         throw ExtractError.tarballTooLarge(data.count)
                     }
-                    return try extract(
-                        data: data,
-                        branch: ref,
-                        destination: destination
-                    )
+                    return try extractIntoMemory(data: data, branch: ref)
                 case .notFound:
                     continue
                 case .transient:
@@ -95,10 +90,9 @@ extension Core {
 
         // MARK: - Extraction
 
-        private func extract(
+        private func extractIntoMemory(
             data: Data,
-            branch: String,
-            destination: URL
+            branch: String
         ) throws -> Result {
             let scratch = FileManager.default.temporaryDirectory
                 .appendingPathComponent("cupertino-pkg-\(UUID().uuidString)")
@@ -112,25 +106,53 @@ extension Core {
             try FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
 
             try runTar(tarballURL: tarballURL, outputDir: extractDir)
-
             try prune(rootURL: extractDir)
 
-            // Wipe destination for a clean re-extract.
-            if FileManager.default.fileExists(atPath: destination.path) {
-                try FileManager.default.removeItem(at: destination)
-            }
-            try FileManager.default.createDirectory(
-                at: destination.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try FileManager.default.moveItem(at: extractDir, to: destination)
+            var files: [ExtractedFile] = []
+            var totalBytes: Int64 = 0
+            // Resolve symlinks on the root so the path comparison works even when
+            // /var/folders/... resolves to /private/var/folders/... at enumeration
+            // time — /var is a symlink on macOS.
+            let rootComponents = extractDir.resolvingSymlinksInPath().pathComponents
 
-            let savedFiles = collectRelativePaths(under: destination)
-            let totalBytes = totalBytesUnder(destination)
+            guard let enumerator = FileManager.default.enumerator(
+                at: extractDir,
+                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]
+            ) else {
+                return Result(branch: branch, files: [], totalBytes: 0, tarballBytes: data.count)
+            }
+
+            while let candidate = enumerator.nextObject() as? URL {
+                guard
+                    let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                    values.isRegularFile == true,
+                    let size = values.fileSize
+                else { continue }
+
+                let candidateComponents = candidate.resolvingSymlinksInPath().pathComponents
+                guard candidateComponents.count > rootComponents.count else { continue }
+                let relpath = candidateComponents
+                    .dropFirst(rootComponents.count)
+                    .joined(separator: "/")
+
+                guard let classified = PackageFileKindClassifier.classify(relpath: relpath) else { continue }
+
+                // Read as UTF-8; silently skip files we can't decode (non-text leakage).
+                guard let content = try? String(contentsOf: candidate, encoding: .utf8) else { continue }
+
+                files.append(ExtractedFile(
+                    relpath: relpath,
+                    kind: classified.kind,
+                    module: classified.module,
+                    content: content,
+                    byteSize: size
+                ))
+                totalBytes += Int64(size)
+            }
 
             return Result(
                 branch: branch,
-                savedFiles: savedFiles,
+                files: files,
                 totalBytes: totalBytes,
                 tarballBytes: data.count
             )
@@ -208,47 +230,6 @@ extension Core {
             for url in toRemove {
                 try? FileManager.default.removeItem(at: url)
             }
-        }
-
-        // MARK: - Enumeration helpers
-
-        private func collectRelativePaths(under root: URL) -> [String] {
-            guard let enumerator = FileManager.default.enumerator(
-                at: root,
-                includingPropertiesForKeys: [.isRegularFileKey]
-            ) else {
-                return []
-            }
-            var paths: [String] = []
-            let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
-            while let candidate = enumerator.nextObject() as? URL {
-                let isRegular = (try? candidate.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile ?? false
-                guard isRegular else { continue }
-                let full = candidate.path
-                if full.hasPrefix(rootPrefix) {
-                    paths.append(String(full.dropFirst(rootPrefix.count)))
-                }
-            }
-            return paths.sorted()
-        }
-
-        private func totalBytesUnder(_ root: URL) -> Int64 {
-            guard let enumerator = FileManager.default.enumerator(
-                at: root,
-                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]
-            ) else {
-                return 0
-            }
-            var total: Int64 = 0
-            while let candidate = enumerator.nextObject() as? URL {
-                guard
-                    let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
-                    values.isRegularFile == true,
-                    let size = values.fileSize
-                else { continue }
-                total += Int64(size)
-            }
-            return total
         }
 
         // MARK: - Exclusion rules (visible for testing)
