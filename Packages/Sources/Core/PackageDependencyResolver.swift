@@ -17,6 +17,7 @@ extension Core {
             public let skippedNonGitHub: Int
             public let missingManifest: Int
             public let malformedManifest: Int
+            public let excludedCount: Int
             public let duration: TimeInterval
 
             public var discoveredCount: Int { resolvedCount - seedCount }
@@ -25,34 +26,57 @@ extension Core {
         private let session: URLSession
         private let requestDelay: TimeInterval
         private let candidateBranches = ["HEAD", "main", "master"]
+        private let canonicalizer: GitHubCanonicalizer?
+        private let exclusions: Set<String>
 
-        public init(requestDelay: TimeInterval = 0.05) {
+        public init(
+            canonicalizer: GitHubCanonicalizer? = nil,
+            exclusions: Set<String> = [],
+            requestDelay: TimeInterval = 0.05
+        ) {
             let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = 15
             config.httpAdditionalHeaders = ["User-Agent": Shared.Constants.App.userAgent]
             session = URLSession(configuration: config)
+            self.canonicalizer = canonicalizer
+            self.exclusions = exclusions
             self.requestDelay = requestDelay
         }
 
-        /// Expand seeds into the transitive dependency closure. Returns packages
-        /// keyed by normalized GitHub URL so the same repo is never duplicated.
+        /// Expand seeds into the transitive dependency closure. Each returned
+        /// `ResolvedPackage` carries the set of seeds whose graph reached it; seeds
+        /// list themselves. Canonicalization dedupes GitHub redirects (so
+        /// `apple/swift-docc` and `swiftlang/swift-docc` collapse into one entry);
+        /// exclusions drop matched canonical names before adding them to the frontier.
         public func resolve(
             seeds: [PackageReference],
             onProgress: (@Sendable (String, Int, Int) -> Void)? = nil
-        ) async -> (packages: [PackageReference], stats: Statistics) {
+        ) async -> (packages: [ResolvedPackage], stats: Statistics) {
             let startedAt = Date()
-            var visited: [String: PackageReference] = [:]
-            var frontier: [PackageReference] = []
+            var visited: [String: ResolvedPackage] = [:]
+            var frontier: [(owner: String, repo: String, seedOrigin: String)] = []
             var skippedNonGitHub = 0
             var missingManifest = 0
             var malformedManifest = 0
+            var excludedCount = 0
 
             for seed in seeds {
-                let key = normalizeKey(owner: seed.owner, repo: seed.repo)
-                if visited[key] == nil {
-                    visited[key] = seed
-                    frontier.append(seed)
+                let canonical = await canonicalize(owner: seed.owner, repo: seed.repo)
+                let key = Self.dedupeKey(owner: canonical.owner, repo: canonical.repo)
+                if exclusions.contains(key) {
+                    excludedCount += 1
+                    continue
                 }
+                if visited[key] != nil { continue }
+                let seedOrigin = key
+                visited[key] = ResolvedPackage(
+                    owner: canonical.owner,
+                    repo: canonical.repo,
+                    url: "https://github.com/\(canonical.owner)/\(canonical.repo)",
+                    priority: classify(owner: canonical.owner),
+                    parents: [seedOrigin]
+                )
+                frontier.append((canonical.owner, canonical.repo, seedOrigin))
             }
             let seedCount = visited.count
 
@@ -79,22 +103,43 @@ extension Core {
                         skippedNonGitHub += 1
                         continue
                     }
-                    let key = normalizeKey(owner: github.owner, repo: github.repo)
-                    if visited[key] != nil { continue }
-                    let ref = PackageReference(
-                        owner: github.owner,
-                        repo: github.repo,
-                        url: github.canonicalURL,
-                        priority: classify(owner: github.owner)
+                    let canonical = await canonicalize(owner: github.owner, repo: github.repo)
+                    let key = Self.dedupeKey(owner: canonical.owner, repo: canonical.repo)
+                    if exclusions.contains(key) {
+                        excludedCount += 1
+                        continue
+                    }
+                    if var existing = visited[key] {
+                        // Record additional provenance so a user can tell why a package
+                        // survives even after dropping one of its seed sources.
+                        if !existing.parents.contains(next.seedOrigin) {
+                            existing = ResolvedPackage(
+                                owner: existing.owner,
+                                repo: existing.repo,
+                                url: existing.url,
+                                priority: existing.priority,
+                                parents: existing.parents + [next.seedOrigin]
+                            )
+                            visited[key] = existing
+                        }
+                        continue
+                    }
+                    visited[key] = ResolvedPackage(
+                        owner: canonical.owner,
+                        repo: canonical.repo,
+                        url: "https://github.com/\(canonical.owner)/\(canonical.repo)",
+                        priority: classify(owner: canonical.owner),
+                        parents: [next.seedOrigin]
                     )
-                    visited[key] = ref
-                    frontier.append(ref)
+                    frontier.append((canonical.owner, canonical.repo, next.seedOrigin))
                 }
 
                 if requestDelay > 0 {
                     try? await Task.sleep(nanoseconds: UInt64(requestDelay * 1_000_000_000))
                 }
             }
+
+            await canonicalizer?.persist()
 
             let packages = Array(visited.values).sorted { lhs, rhs in
                 if lhs.owner == rhs.owner { return lhs.repo < rhs.repo }
@@ -106,9 +151,22 @@ extension Core {
                 skippedNonGitHub: skippedNonGitHub,
                 missingManifest: missingManifest,
                 malformedManifest: malformedManifest,
+                excludedCount: excludedCount,
                 duration: Date().timeIntervalSince(startedAt)
             )
             return (packages, stats)
+        }
+
+        // MARK: - Canonicalisation
+
+        private func canonicalize(owner: String, repo: String) async -> (owner: String, repo: String) {
+            guard let canonicalizer else { return (owner, repo) }
+            let canonical = await canonicalizer.canonicalize(owner: owner, repo: repo)
+            return (canonical.owner, canonical.repo)
+        }
+
+        internal static func dedupeKey(owner: String, repo: String) -> String {
+            "\(owner.lowercased())/\(repo.lowercased())"
         }
 
         // MARK: - Manifest fetch
@@ -301,15 +359,6 @@ extension Core {
             return .ecosystem
         }
 
-        private func normalizeKey(owner: String, repo: String) -> String {
-            "\(owner.lowercased())/\(repo.lowercased())"
-        }
-
-        private func logDebug(_ message: String) {
-            // Debug-only noise; keep out of default stdout. Users who want it can run
-            // with CUPERTINO_DEBUG_RESOLVER=1 in the future. For now, silent.
-            _ = message
-        }
     }
 }
 

@@ -80,9 +80,15 @@ struct FetchCommand: AsyncParsableCommand {
     @Flag(
         name: .long,
         inversion: .prefixedNo,
-        help: "Walk Package.resolved transitively when fetching package docs so dependencies of seed packages are indexed too"
+        help: "Walk each package's dependencies transitively when fetching package docs, so deps of seeds are indexed too"
     )
     var recurse: Bool = true
+
+    @Flag(
+        name: .long,
+        help: "Discard the cached resolved closure and re-walk every dependency graph from scratch"
+    )
+    var refresh: Bool = false
 
     mutating func run() async throws {
         logStartMessage()
@@ -448,25 +454,72 @@ struct FetchCommand: AsyncParsableCommand {
             )
         }
 
+        let exclusions = Core.ExclusionList.load()
+        let seedChecksum = Core.ResolvedPackagesStore.checksum(seeds: seedRefs, exclusions: exclusions)
+        let resolvedStoreURL = Shared.Constants.defaultBaseDirectory
+            .appendingPathComponent(Shared.Constants.FileName.resolvedPackages)
+        let canonicalCacheURL = Shared.Constants.defaultBaseDirectory
+            .appendingPathComponent(".cache")
+            .appendingPathComponent(Shared.Constants.FileName.canonicalOwnersCache)
+
         let packageRefs: [PackageReference]
         if recurse {
-            Logging.ConsoleLogger.info("🔗 Resolving transitive dependencies for \(seedRefs.count) seed packages...")
-            let resolver = Core.PackageDependencyResolver()
-            let (resolved, resolverStats) = await resolver.resolve(seeds: seedRefs) { name, done, total in
-                if done == 1 || done % 10 == 0 || done == total {
-                    Logging.ConsoleLogger.output("   Resolving: \(done)/\(total) (\(name))")
+            if !refresh,
+               let cached = Core.ResolvedPackagesStore.load(from: resolvedStoreURL),
+               cached.seedChecksum == seedChecksum
+            {
+                Logging.ConsoleLogger.info("🔗 Using cached closure from resolved-packages.json (\(cached.packages.count) packages, generated \(cached.generatedAt))")
+                packageRefs = cached.packages.map { pkg in
+                    PackageReference(owner: pkg.owner, repo: pkg.repo, url: pkg.url, priority: pkg.priority)
+                }
+            } else {
+                if refresh {
+                    Logging.ConsoleLogger.info("🔗 --refresh: discarding cached closure, re-walking dependency graphs...")
+                } else {
+                    Logging.ConsoleLogger.info("🔗 Resolving transitive dependencies for \(seedRefs.count) seed packages...")
+                }
+                if !exclusions.isEmpty {
+                    Logging.ConsoleLogger.info("   Exclusion list in effect: \(exclusions.count) entries")
+                }
+                let canonicalizer = Core.GitHubCanonicalizer(cacheURL: canonicalCacheURL)
+                let resolver = Core.PackageDependencyResolver(
+                    canonicalizer: canonicalizer,
+                    exclusions: exclusions
+                )
+                let (resolved, resolverStats) = await resolver.resolve(seeds: seedRefs) { name, done, total in
+                    if done == 1 || done % 10 == 0 || done == total {
+                        Logging.ConsoleLogger.output("   Resolving: \(done)/\(total) (\(name))")
+                    }
+                }
+                packageRefs = resolved.map { pkg in
+                    PackageReference(owner: pkg.owner, repo: pkg.repo, url: pkg.url, priority: pkg.priority)
+                }
+                Logging.ConsoleLogger.info("   Seeds: \(resolverStats.seedCount)")
+                Logging.ConsoleLogger.info("   Discovered via dependencies: \(resolverStats.discoveredCount)")
+                Logging.ConsoleLogger.info("   Excluded: \(resolverStats.excludedCount)")
+                Logging.ConsoleLogger.info("   Skipped (non-GitHub): \(resolverStats.skippedNonGitHub)")
+                Logging.ConsoleLogger.info("   Missing manifest: \(resolverStats.missingManifest)")
+                Logging.ConsoleLogger.info("   Malformed manifest: \(resolverStats.malformedManifest)")
+                Logging.ConsoleLogger.info("   Resolver duration: \(Int(resolverStats.duration))s")
+
+                let store = Core.ResolvedPackagesStore(
+                    cupertinoVersion: Shared.Constants.App.version,
+                    seedChecksum: seedChecksum,
+                    packages: resolved
+                )
+                do {
+                    try store.write(to: resolvedStoreURL)
+                    Logging.ConsoleLogger.info("   Saved closure to \(resolvedStoreURL.path)")
+                } catch {
+                    Logging.ConsoleLogger.error("   ⚠️  Could not persist resolved-packages.json: \(error)")
                 }
             }
-            packageRefs = resolved
-            Logging.ConsoleLogger.info("   Seeds: \(resolverStats.seedCount)")
-            Logging.ConsoleLogger.info("   Discovered via dependencies: \(resolverStats.discoveredCount)")
-            Logging.ConsoleLogger.info("   Skipped (non-GitHub): \(resolverStats.skippedNonGitHub)")
-            Logging.ConsoleLogger.info("   Missing Package.resolved: \(resolverStats.missingManifest)")
-            Logging.ConsoleLogger.info("   Malformed Package.resolved: \(resolverStats.malformedManifest)")
-            Logging.ConsoleLogger.info("   Resolver duration: \(Int(resolverStats.duration))s")
         } else {
             packageRefs = seedRefs
             Logging.ConsoleLogger.info("🔗 Skipping dependency resolution (--no-recurse)")
+            if !exclusions.isEmpty {
+                Logging.ConsoleLogger.info("   Exclusion list ignored while --no-recurse is set")
+            }
         }
 
         Logging.ConsoleLogger.info("📦 Downloading documentation for \(packageRefs.count) packages...")

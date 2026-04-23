@@ -62,6 +62,15 @@ extension Shared {
             /// User-selected packages file
             public static let selectedPackages = "selected-packages.json"
 
+            /// User-maintained exclusion list (flat array of "owner/repo" strings)
+            public static let excludedPackages = "excluded-packages.json"
+
+            /// Machine-written transitive closure of seeds+exclusions (cache)
+            public static let resolvedPackages = "resolved-packages.json"
+
+            /// Per-repo GitHub canonical-name cache (owner/repo → redirect target)
+            public static let canonicalOwnersCache = "canonical-owners.json"
+
             /// Package fetch checkpoint file
             public static let checkpoint = "checkpoint.json"
 
