@@ -2,6 +2,7 @@
 @testable import Search
 import Foundation
 import Shared
+import SQLite3
 import Testing
 
 // MARK: - symbolTokens / splitIdentifier
@@ -52,6 +53,116 @@ func extractTitleNonMarkdown() {
 }
 
 // MARK: - PackageIndex SQL round-trip
+
+// MARK: - FTS search against a populated temp DB
+
+@Test("PackageIndex: content column matches on words")
+func packageIndexSearchesContent() async throws {
+    let (dbPath, cleanup) = try await seedTempIndex()
+    defer { cleanup() }
+
+    // Open directly (bypasses the actor so we can run a raw SELECT).
+    let rows = try runFTSQuery(
+        dbPath: dbPath,
+        sql: "SELECT owner, repo, relpath FROM package_files_fts WHERE content MATCH 'logger' ORDER BY bm25(package_files_fts)"
+    )
+    #expect(rows.count >= 1)
+    #expect(rows.contains { $0[2] == "Sources/Logging/Logger.swift" })
+}
+
+@Test("PackageIndex: symbols column finds camelCase tokens")
+func packageIndexSymbolsColumnCamelCase() async throws {
+    let (dbPath, cleanup) = try await seedTempIndex()
+    defer { cleanup() }
+
+    // Query for a WORD that's only present inside a camelCase identifier.
+    // The symbols column contains a case-split form so this should match.
+    let rows = try runFTSQuery(
+        dbPath: dbPath,
+        sql: "SELECT relpath FROM package_files_fts WHERE symbols MATCH 'level'"
+    )
+    #expect(!rows.isEmpty)
+}
+
+@Test("PackageIndex: kind filter restricts results")
+func packageIndexKindFilter() async throws {
+    let (dbPath, cleanup) = try await seedTempIndex()
+    defer { cleanup() }
+
+    let readmeHits = try runFTSQuery(
+        dbPath: dbPath,
+        sql: "SELECT relpath FROM package_files_fts WHERE content MATCH 'logging' AND kind = 'readme'"
+    )
+    let sourceHits = try runFTSQuery(
+        dbPath: dbPath,
+        sql: "SELECT relpath FROM package_files_fts WHERE content MATCH 'logging' AND kind = 'source'"
+    )
+    #expect(readmeHits.allSatisfy { $0[0].hasSuffix("README.md") })
+    #expect(sourceHits.allSatisfy { $0[0].hasSuffix(".swift") })
+}
+
+// MARK: - Helpers for FTS tests
+
+private func seedTempIndex() async throws -> (URL, () -> Void) {
+    let tempDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("cupertino-pkgidx-ftstest-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    let dbPath = tempDir.appendingPathComponent("packages.db")
+
+    let index = try await Search.PackageIndex(dbPath: dbPath)
+    let resolved = Core.ResolvedPackage(
+        owner: "apple", repo: "swift-log",
+        url: "https://github.com/apple/swift-log",
+        priority: .appleOfficial,
+        parents: ["apple/swift-log"]
+    )
+    let files: [Core.ExtractedFile] = [
+        .init(relpath: "README.md", kind: .readme, module: nil,
+              content: "# swift-log\n\nUnified logging API for Swift.", byteSize: 50),
+        .init(relpath: "Sources/Logging/Logger.swift", kind: .source, module: "Logging",
+              content: "public struct Logger { public var logLevel = LogLevel.info; public let label: String }", byteSize: 100),
+    ]
+    _ = try await index.index(
+        resolved: resolved,
+        extraction: Core.PackageArchiveExtractor.Result(
+            branch: "HEAD", files: files, totalBytes: 150, tarballBytes: 1000
+        )
+    )
+    await index.disconnect()
+    return (dbPath, { try? FileManager.default.removeItem(at: tempDir) })
+}
+
+private func runFTSQuery(dbPath: URL, sql: String) throws -> [[String]] {
+    var db: OpaquePointer?
+    guard sqlite3_open_v2(dbPath.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        throw PackageIndexTestError.sqliteOpen
+    }
+    defer { sqlite3_close(db) }
+    var statement: OpaquePointer?
+    defer { sqlite3_finalize(statement) }
+    guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+        throw PackageIndexTestError.sqlitePrepare(String(cString: sqlite3_errmsg(db)))
+    }
+    var rows: [[String]] = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+        let colCount = sqlite3_column_count(statement)
+        var row: [String] = []
+        for i in 0..<colCount {
+            if let cstr = sqlite3_column_text(statement, i) {
+                row.append(String(cString: cstr))
+            } else {
+                row.append("")
+            }
+        }
+        rows.append(row)
+    }
+    return rows
+}
+
+private enum PackageIndexTestError: Error {
+    case sqliteOpen
+    case sqlitePrepare(String)
+}
 
 @Test("PackageIndex: index + summary + dedupe round-trip")
 func packageIndexRoundTrip() async throws {
