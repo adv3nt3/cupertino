@@ -385,6 +385,14 @@ public final class SampleCodeDownloader {
 
         #if os(macOS)
         if visibleBrowser {
+            // Fix for #6: a bare CLI process is created with activation policy
+            // `.prohibited`, which makes `NSWindow.makeKeyAndOrderFront` a silent
+            // no-op — the user sees no window and the flag appears to do nothing.
+            // Flipping to `.regular` attaches the process to the window server so
+            // the auth window actually appears (and puts a temporary icon in the
+            // Dock, which is acceptable for a short auth flow).
+            NSApp.setActivationPolicy(.regular)
+
             // Create webview with proper frame
             let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1024, height: 768))
 
@@ -417,8 +425,9 @@ public final class SampleCodeDownloader {
             logInfo("   Sign in to your Apple Developer account")
             logInfo("   Press Enter when you're done signing in...")
 
-            // Wait for user to press enter
-            // Note: Using Task.detached to avoid blocking MainActor with synchronous readLine()
+            // Wait for the user to press Enter after signing in.
+            // Note: the run loop pumps via WKWebView's own timer sources on
+            // MainActor; the detached task keeps readLine off the main thread.
             await Task.detached {
                 _ = readLine()
             }.value
