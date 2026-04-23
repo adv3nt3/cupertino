@@ -2197,6 +2197,12 @@ extension Search {
             let (_, queryForFTS) = extractAttributeFilters(queryToSearch)
             let sanitizedQuery = sanitizeFTS5Query(queryForFTS)
 
+            // Per-column bm25 weights (#181): title dominates, summary next, framework
+            // modest bonus. Body matches are common and easily dilute ranking; title
+            // matches are the user's clearest intent signal. Column order matches the
+            // docs_fts declaration: uri, source, framework, language, title, content, summary.
+            // Prevents e.g. `task_info` (Mach kernel) outranking `Task` (Swift) for the
+            // query "Task", because the Swift Task struct has a title-level match.
             var sql = """
             SELECT
                 f.uri,
@@ -2206,7 +2212,7 @@ extension Search {
                 f.summary,
                 m.file_path,
                 m.word_count,
-                bm25(docs_fts) as rank,
+                bm25(docs_fts, 1.0, 1.0, 2.0, 1.0, 10.0, 1.0, 3.0) as rank,
                 COALESCE(s.kind, 'unknown') as kind,
                 m.min_ios,
                 m.min_macos,
