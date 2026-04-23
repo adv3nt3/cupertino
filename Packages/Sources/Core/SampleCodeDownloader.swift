@@ -408,7 +408,17 @@ public final class SampleCodeDownloader {
         NSApplication.shared.setActivationPolicy(Self.authFlowActivationPolicy)
         defer { NSApplication.shared.setActivationPolicy(.prohibited) }
 
-        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1024, height: 768))
+        // Explicit config so the auth WebView behaves like the rest of the
+        // downloader's browser automation (#6 follow-up: the previous plain
+        // `WKWebView(frame:)` got a fresh data store and no UA, which led
+        // Apple's login page to serve blank content).
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default()
+        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 1024, height: 768), configuration: config)
+        webView.customUserAgent = """
+        Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
+        AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15
+        """
         await loadCookies(into: webView)
 
         let window = NSWindow(
@@ -730,6 +740,21 @@ private final class AuthFlowCoordinator: NSObject, WKNavigationDelegate {
                 self?.complete(.autoDetected)
             }
         }
+    }
+
+    /// Surface navigation failures so an empty auth window doesn't silently
+    /// leave the user staring at a blank pane. Callers still see the window
+    /// and can retry / close; we just make sure the error lands in the logs.
+    nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        Logging.ConsoleLogger.error("🔐 Auth WebView navigation failed: \(error.localizedDescription)")
+    }
+
+    nonisolated func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        Logging.ConsoleLogger.error("🔐 Auth WebView provisional navigation failed: \(error.localizedDescription)")
     }
 
     // MARK: Explicit signals
