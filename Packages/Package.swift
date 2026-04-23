@@ -96,9 +96,12 @@ let targets: [Target] = {
         dependencies: ["Shared", "TestSupport"]
     )
 
+    // Resources target (#161): catalogs are now compiled in as Swift string
+    // literals under Sources/Resources/Embedded/ rather than shipped as a
+    // `Cupertino_Resources.bundle` next to the binary. No resources: [] entry
+    // needed — SPM just compiles the Swift files in the target directory.
     let resourcesTarget = Target.target(
-        name: "Resources",
-        resources: [.process("Resources")]
+        name: "Resources"
     )
 
     let coreTarget = Target.target(

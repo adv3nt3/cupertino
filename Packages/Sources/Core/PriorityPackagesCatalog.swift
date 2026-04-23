@@ -125,19 +125,17 @@ public enum PriorityPackagesCatalog {
             }
         }
 
-        // Fall back to bundled resource
-        guard let url = CupertinoResources.bundle.url(forResource: "priority-packages", withExtension: "json") else {
-            fatalError("❌ priority-packages.json not found in Resources")
+        // Fall back to embedded resource (#161: no more runtime bundle lookup)
+        guard let data = CupertinoResources.jsonData(named: "priority-packages") else {
+            fatalError("❌ priority-packages embedded JSON missing — should be impossible")
         }
 
         do {
-            let data = try Data(contentsOf: url)
-            let decoder = JSONDecoder()
-            let catalog = try decoder.decode(PriorityPackagesCatalogJSON.self, from: data)
+            let catalog = try JSONDecoder().decode(PriorityPackagesCatalogJSON.self, from: data)
             await cache.set(catalog)
             return catalog
         } catch {
-            fatalError("❌ Failed to load priority-packages.json: \(error)")
+            fatalError("❌ Failed to decode embedded priority-packages JSON: \(error)")
         }
     }
 
@@ -169,10 +167,7 @@ public enum PriorityPackagesCatalog {
             return
         }
 
-        guard let bundleURL = CupertinoResources.bundle.url(
-            forResource: "priority-packages",
-            withExtension: "json"
-        ) else {
+        guard let embeddedData = CupertinoResources.jsonData(named: "priority-packages") else {
             return
         }
 
@@ -182,10 +177,9 @@ public enum PriorityPackagesCatalog {
                 try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
             }
 
-            let data = try Data(contentsOf: bundleURL)
-            try data.write(to: selectedURL)
+            try embeddedData.write(to: selectedURL)
         } catch {
-            // Silently fail - fall back to bundled resource in loadCatalog
+            // Silently fail - fall back to embedded resource in loadCatalog
         }
     }
 

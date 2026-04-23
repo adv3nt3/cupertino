@@ -1,3 +1,13 @@
+// Auto-generated from archive-guides-catalog.json. Do not edit by hand.
+// Regenerate via: Scripts/generate-embedded-catalogs.sh
+
+import Foundation
+
+/// JSON content embedded at build time. Replaces the runtime
+/// `Bundle.module`/`CupertinoResources.bundle` lookup that failed on
+/// Homebrew installs (#161). Updated via PR.
+public enum ArchiveGuidesCatalogEmbedded {
+    public static let json: String = #"""
 {
   "count": 47,
   "guides": [
@@ -371,4 +381,9 @@
     }
   ],
   "baseURL": "https://developer.apple.com/library/archive/documentation"
+}
+
+"""#
+
+    public static var data: Data { Data(json.utf8) }
 }

@@ -474,11 +474,13 @@ struct SaveCommandTests {
 
         if let pkg = results.first {
             #expect(pkg.owner == "apple" || pkg.owner == "Apple", "Should have correct owner")
-            #expect(pkg.stars > 0, "Should have star count")
             #expect(pkg.repositoryURL.contains("github.com"), "Should have repository URL")
+            // Star count is no longer carried by the embedded URL-only catalog
+            // (#161 slimming). It returns to the DB once v1.0.0's packages.db
+            // distribution lands and the indexer pulls stars from there.
         }
 
-        print("   ✅ Package metadata verified")
+        print("   ✅ Package metadata verified (post-#161 URL-only catalog)")
         print("   ✅ Package metadata test passed!")
     }
 }

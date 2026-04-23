@@ -1,3 +1,13 @@
+// Auto-generated from priority-packages.json. Do not edit by hand.
+// Regenerate via: Scripts/generate-embedded-catalogs.sh
+
+import Foundation
+
+/// JSON content embedded at build time. Replaces the runtime
+/// `Bundle.module`/`CupertinoResources.bundle` lookup that failed on
+/// Homebrew installs (#161). Updated via PR.
+public enum PriorityPackagesEmbedded {
+    public static let json: String = #"""
 {
   "version": "1.1",
   "lastUpdated": "2026-04-23",
@@ -157,4 +167,9 @@
     "totalEcosystemPackages": 92,
     "totalPriorityPackages": 135
   }
+}
+
+"""#
+
+    public static var data: Data { Data(json.utf8) }
 }

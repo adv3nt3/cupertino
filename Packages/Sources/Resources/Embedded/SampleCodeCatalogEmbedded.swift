@@ -1,3 +1,13 @@
+// Auto-generated from sample-code-catalog.json. Do not edit by hand.
+// Regenerate via: Scripts/generate-embedded-catalogs.sh
+
+import Foundation
+
+/// JSON content embedded at build time. Replaces the runtime
+/// `Bundle.module`/`CupertinoResources.bundle` lookup that failed on
+/// Homebrew installs (#161). Updated via PR.
+public enum SampleCodeCatalogEmbedded {
+    public static let json: String = ####"""
 {
   "count" : 606,
   "entries" : [
@@ -4852,4 +4862,8 @@
   ],
   "lastCrawled" : "2025-11-17",
   "version" : "1.0"
+}
+"""####
+
+    public static var data: Data { Data(json.utf8) }
 }

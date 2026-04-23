@@ -1,26 +1,53 @@
-// This file makes CupertinoResources a valid SPM target.
-// The real resources are the JSON files in this directory.
+// CupertinoResources.swift
+//
+// Embedded-only resources (#161). Previously this target shipped a
+// `Cupertino_Resources.bundle` alongside the binary and looked up JSON files
+// through `Bundle.module`. That fails on Homebrew installs where the bundle
+// symlink isn't in the same directory as the symlinked binary — `Bundle.module`
+// fatal-errors and the process traps.
+//
+// This rewrite eliminates the bundle entirely. The four JSON catalogs are
+// compiled into the binary as raw-string literals in `Embedded/*.swift`
+// (auto-generated — regenerate via `Scripts/generate-embedded-catalogs.sh`).
+// Accessors below return them as `Data` so consumers can decode directly.
+//
+// No bundle = no brew symlink = no fatal runtime lookup.
 
 import Foundation
 
-/// Public accessor for CupertinoResources bundle.
-/// Provides access to embedded resource files like sample-code-catalog.json.
 public enum CupertinoResources {
-    /// Public accessor for the resources bundle.
-    /// Uses SPM's Bundle.module first, then falls back to resolving symlinks
-    /// (needed for Homebrew installations where the binary is symlinked).
-    public static let bundle: Bundle = {
-        // SPM-generated Bundle.module checks Bundle.main.bundleURL, but that doesn't
-        // resolve symlinks. For Homebrew installs, the binary is symlinked from
-        // /opt/homebrew/bin/ → Cellar, so Bundle.main.bundleURL points to the wrong dir.
-        // Try the resolved-symlink path first, then fall back to Bundle.module.
-        if let execURL = Bundle.main.executableURL {
-            let resolved = execURL.resolvingSymlinksInPath().deletingLastPathComponent()
-            let resolvedBundle = resolved.appendingPathComponent("Cupertino_Resources.bundle")
-            if let bundle = Bundle(url: resolvedBundle) {
-                return bundle
-            }
+    /// Return the embedded JSON blob for `name` (no extension), or nil if unknown.
+    /// Consumers that used `bundle.url(forResource:withExtension:"json")` +
+    /// `Data(contentsOf: url)` should switch to `jsonData(named:)`.
+    ///
+    /// Note: the Swift packages catalog (`swift-packages-catalog`) was slimmed
+    /// to a URL list in `SwiftPackagesCatalogEmbedded.urls` and is no longer
+    /// exposed as a JSON blob. Consumers should use `Core.SwiftPackagesCatalog`
+    /// directly instead of looking up the raw JSON.
+    public static func jsonData(named name: String) -> Data? {
+        switch name {
+        case "priority-packages":
+            return PriorityPackagesEmbedded.data
+        case "archive-guides-catalog":
+            return ArchiveGuidesCatalogEmbedded.data
+        case "sample-code-catalog":
+            return SampleCodeCatalogEmbedded.data
+        default:
+            return nil
         }
-        return Bundle.module
-    }()
+    }
+
+    /// Raw JSON string for `name` (no extension), or nil if unknown.
+    public static func jsonString(named name: String) -> String? {
+        switch name {
+        case "priority-packages":
+            return PriorityPackagesEmbedded.json
+        case "archive-guides-catalog":
+            return ArchiveGuidesCatalogEmbedded.json
+        case "sample-code-catalog":
+            return SampleCodeCatalogEmbedded.json
+        default:
+            return nil
+        }
+    }
 }

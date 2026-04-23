@@ -125,33 +125,10 @@ func swiftPackagesCatalogSearch() async throws {
     print("   ✅ Found \(results.count) results for 'SwiftUI'")
 }
 
-@Test("SwiftPackagesCatalog top packages returns sorted by stars")
-func swiftPackagesCatalogTopPackages() async throws {
-    let topPackages = await SwiftPackagesCatalog.topPackages(limit: 10)
-    #expect(topPackages.count == 10, "Should return 10 top packages")
-
-    // Verify they are sorted by stars (descending)
-    for index in 0..<(topPackages.count - 1) {
-        #expect(topPackages[index].stars >= topPackages[index + 1].stars, "Packages should be sorted by stars")
-    }
-
-    print("   ✅ Top package: \(topPackages[0].owner)/\(topPackages[0].repo) with \(topPackages[0].stars) stars")
-}
-
-@Test("SwiftPackagesCatalog active packages filter works")
-func swiftPackagesCatalogActivePackages() async throws {
-    let activePackages = await SwiftPackagesCatalog.activePackages(minStars: 100)
-    #expect(!activePackages.isEmpty, "Should have active packages with 100+ stars")
-
-    // Verify all are non-fork, non-archived, and have minimum stars
-    for package in activePackages {
-        #expect(!package.fork, "Package should not be a fork")
-        #expect(!package.archived, "Package should not be archived")
-        #expect(package.stars >= 100, "Package should have at least 100 stars")
-    }
-
-    print("   ✅ Found \(activePackages.count) active packages with 100+ stars")
-}
+// Removed in #161: `topPackages(limit:)` and `activePackages(minStars:)` relied
+// on metadata (stars, fork, archived) that the slimmed URL-only catalog no
+// longer carries. Once packages.db lands in v1.0.0, those queries should come
+// from the DB; test coverage will move there.
 
 // MARK: - PriorityPackagesCatalog Tests
 

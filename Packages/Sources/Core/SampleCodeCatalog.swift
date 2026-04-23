@@ -58,18 +58,16 @@ public enum SampleCodeCatalog {
             return cached
         }
 
-        guard let url = CupertinoResources.bundle.url(forResource: "sample-code-catalog", withExtension: "json") else {
-            fatalError("❌ sample-code-catalog.json not found in Resources")
+        guard let data = CupertinoResources.jsonData(named: "sample-code-catalog") else {
+            fatalError("❌ sample-code-catalog embedded JSON missing — should be impossible")
         }
 
         do {
-            let data = try Data(contentsOf: url)
-            let decoder = JSONDecoder()
-            let catalog = try decoder.decode(SampleCodeCatalogJSON.self, from: data)
+            let catalog = try JSONDecoder().decode(SampleCodeCatalogJSON.self, from: data)
             await cache.set(catalog)
             return catalog
         } catch {
-            fatalError("❌ Failed to load sample-code-catalog.json: \(error)")
+            fatalError("❌ Failed to decode embedded sample-code-catalog JSON: \(error)")
         }
     }
 
