@@ -202,9 +202,9 @@ struct PackageDocumentationDownloaderTests {
             }
 
             #expect(stats.totalPackages == 1)
-            #expect(stats.successfulREADMEs == 1)
-            #expect(stats.newREADMEs == 1) // First download should be new
-            #expect(stats.updatedREADMEs == 0)
+            #expect(stats.successfulPackages == 1)
+            #expect(stats.newPackages == 1) // First download should be new
+            #expect(stats.updatedPackages == 0)
             let progressUpdates = await progressCounter.value
             #expect(progressUpdates > 0)
 
@@ -248,7 +248,7 @@ struct PackageDocumentationDownloaderTests {
             let stats = try await downloader.download(packages: packages)
 
             #expect(stats.totalPackages == 2)
-            #expect(stats.successfulREADMEs == 2)
+            #expect(stats.successfulPackages == 2)
 
             // Cleanup
             try? FileManager.default.removeItem(at: tempDir)
@@ -280,7 +280,7 @@ struct PackageDocumentationDownloaderTests {
 
             #expect(stats.totalPackages == 1)
             #expect(stats.errors == 1)
-            #expect(stats.successfulREADMEs == 0)
+            #expect(stats.successfulPackages == 0)
 
             // Cleanup
             try? FileManager.default.removeItem(at: tempDir)
@@ -368,7 +368,7 @@ struct PackageDocumentationDownloaderTests {
 
             // Should succeed even though directory exists
             let stats = try await downloader.download(packages: [package])
-            #expect(stats.successfulREADMEs == 1)
+            #expect(stats.successfulPackages == 1)
 
             // Cleanup
             try? FileManager.default.removeItem(at: tempDir)

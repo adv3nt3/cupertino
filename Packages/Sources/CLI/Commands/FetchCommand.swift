@@ -26,7 +26,7 @@ struct FetchCommand: AsyncParsableCommand {
         help: """
         Type of documentation to fetch: docs (Apple), swift (Swift.org), \
         evolution (Swift Evolution), packages (Swift package metadata), \
-        package-docs (Swift package READMEs), code (Sample code from Apple), \
+        code (Sample code from Apple), \
         samples (Sample code from GitHub - recommended), \
         archive (Apple Archive guides), hig (Human Interface Guidelines), \
         availability (API version info for existing docs), \
@@ -80,13 +80,13 @@ struct FetchCommand: AsyncParsableCommand {
     @Flag(
         name: .long,
         inversion: .prefixedNo,
-        help: "Walk each package's dependencies transitively when fetching package docs, so deps of seeds are indexed too"
+        help: .hidden
     )
     var recurse: Bool = true
 
     @Flag(
         name: .long,
-        help: "Discard the cached resolved closure and re-walk every dependency graph from scratch"
+        help: .hidden
     )
     var refresh: Bool = false
 
@@ -542,8 +542,10 @@ struct FetchCommand: AsyncParsableCommand {
         Logging.ConsoleLogger.output("")
         Logging.ConsoleLogger.info("✅ Download completed!")
         Logging.ConsoleLogger.info("   Total packages: \(stats.totalPackages)")
-        Logging.ConsoleLogger.info("   New READMEs: \(stats.newREADMEs)")
-        Logging.ConsoleLogger.info("   Updated READMEs: \(stats.updatedREADMEs)")
+        Logging.ConsoleLogger.info("   New packages: \(stats.newPackages)")
+        Logging.ConsoleLogger.info("   Updated packages: \(stats.updatedPackages)")
+        Logging.ConsoleLogger.info("   Files saved: \(stats.totalFilesSaved)")
+        Logging.ConsoleLogger.info("   Bytes saved: \(stats.totalBytesSaved / 1024) KB")
         Logging.ConsoleLogger.info("   Errors: \(stats.errors)")
         if let duration = stats.duration {
             Logging.ConsoleLogger.info("   Duration: \(Int(duration))s")

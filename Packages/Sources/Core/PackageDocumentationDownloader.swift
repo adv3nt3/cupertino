@@ -4,13 +4,19 @@ import Shared
 
 // MARK: - Package Documentation Downloader
 
-/// Downloads documentation for Swift packages (READMEs and hosted docs)
+/// Fetches repository archives (README + CHANGELOG + LICENSE + Package.swift +
+/// Sources/ + Tests/ + .docc + Examples) for each package via
+/// `codeload.github.com/<owner>/<repo>/tar.gz/<ref>`, strips the noise, and writes
+/// the result under `<outputDirectory>/<owner>/<repo>/`. Each package gets a
+/// `manifest.json` recording what was saved and where the archive came from.
 extension Core {
     public actor PackageDocumentationDownloader {
         private let outputDirectory: URL
+        private let extractor: PackageArchiveExtractor
 
-        public init(outputDirectory: URL) {
+        public init(outputDirectory: URL, extractor: PackageArchiveExtractor? = nil) {
             self.outputDirectory = outputDirectory
+            self.extractor = extractor ?? PackageArchiveExtractor()
         }
 
         // MARK: - Public API
@@ -25,72 +31,69 @@ extension Core {
                 startTime: Date()
             )
 
-            logInfo("📦 Downloading documentation for \(packages.count) packages...")
+            logInfo("📦 Fetching archives for \(packages.count) packages...")
 
             for (index, package) in packages.enumerated() {
                 let packageName = "\(package.owner)/\(package.repo)"
-
-                // Report progress
                 let progress = PackageDownloadProgress(
                     currentPackage: packageName,
                     completed: index,
                     total: packages.count,
-                    status: "Downloading README"
+                    status: "Fetching archive"
                 )
                 onProgress?(progress)
 
-                // Log progress periodically
                 if (index + 1) % Shared.Constants.Interval.progressLogEvery == 0 {
                     let percent = String(format: "%.1f", progress.percentage)
                     logInfo("📊 Progress: \(percent)% (\(index + 1)/\(packages.count))")
                 }
 
+                let packageDir = outputDirectory
+                    .appendingPathComponent(package.owner)
+                    .appendingPathComponent(package.repo)
+                let isNew = !FileManager.default.fileExists(atPath: packageDir.path)
+
                 do {
-                    // Check if README already exists (for new vs updated tracking)
-                    let packageDir = outputDirectory
-                        .appendingPathComponent(package.owner)
-                        .appendingPathComponent(package.repo)
-                    let readmePath = packageDir.appendingPathComponent("README.md")
-                    let isNew = !FileManager.default.fileExists(atPath: readmePath.path)
-
-                    // Download README.md
-                    let readme = try await downloadREADME(
+                    let result = try await extractor.fetchAndExtract(
                         owner: package.owner,
-                        repo: package.repo
+                        repo: package.repo,
+                        destination: packageDir
                     )
 
-                    // Save README to disk
-                    try await saveREADME(
-                        readme,
+                    let hostedURL = await detectDocumentationSite(
                         owner: package.owner,
                         repo: package.repo
+                    )?.baseURL
+                    try writeManifest(
+                        for: package,
+                        result: result,
+                        hostedURL: hostedURL,
+                        destination: packageDir
                     )
 
-                    // Track new vs updated
                     if isNew {
-                        stats.newREADMEs += 1
-                        logInfo("  ✅ \(packageName) - New README saved")
+                        stats.newPackages += 1
                     } else {
-                        stats.updatedREADMEs += 1
-                        logInfo("  ♻️  \(packageName) - README updated")
+                        stats.updatedPackages += 1
                     }
+                    stats.totalFilesSaved += result.savedFiles.count
+                    stats.totalBytesSaved += result.totalBytes
 
-                    // Check for documentation site
-                    if let site = await detectDocumentationSite(
-                        owner: package.owner,
-                        repo: package.repo
-                    ) {
-                        logInfo("  📚 Found documentation site: \(site.baseURL)")
-                        // Note: Full documentation site downloading will be implemented
-                        // in a future enhancement. Currently detects sites for visibility.
-                    }
-
+                    let sizeKB = result.totalBytes / 1024
+                    let label = isNew ? "New" : "Updated"
+                    logInfo("  ✅ \(packageName) - \(label), \(result.savedFiles.count) files, \(sizeKB) KB")
+                } catch PackageArchiveExtractor.ExtractError.tarballNotFound {
+                    stats.errors += 1
+                    logError("  ✗ \(packageName) - archive not found on any candidate ref")
+                } catch PackageArchiveExtractor.ExtractError.tarballTooLarge(let bytes) {
+                    stats.errors += 1
+                    let mb = bytes / (1024 * 1024)
+                    logError("  ✗ \(packageName) - archive too large (\(mb) MB) — skipped")
                 } catch {
                     stats.errors += 1
                     logError("  ✗ \(packageName) - \(error.localizedDescription)")
                 }
 
-                // Priority-based rate limiting (matches PackageFetcher pattern)
                 if index < packages.count - 1 {
                     try await applyRateLimit(for: package, at: index)
                 }
@@ -100,14 +103,55 @@ extension Core {
 
             logInfo("\n✅ Download completed!")
             logInfo("   Total packages: \(stats.totalPackages)")
-            logInfo("   New READMEs: \(stats.newREADMEs)")
-            logInfo("   Updated READMEs: \(stats.updatedREADMEs)")
+            logInfo("   New: \(stats.newPackages)")
+            logInfo("   Updated: \(stats.updatedPackages)")
+            logInfo("   Files saved: \(stats.totalFilesSaved)")
+            logInfo("   Bytes saved: \(stats.totalBytesSaved / 1024) KB")
             logInfo("   Errors: \(stats.errors)")
             if let duration = stats.duration {
                 logInfo("   Duration: \(Int(duration))s")
             }
 
             return stats
+        }
+
+        // MARK: - Manifest
+
+        private func writeManifest(
+            for package: PackageReference,
+            result: PackageArchiveExtractor.Result,
+            hostedURL: URL?,
+            destination: URL
+        ) throws {
+            struct Manifest: Encodable {
+                let owner: String
+                let repo: String
+                let url: String
+                let fetchedAt: Date
+                let cupertinoVersion: String
+                let branch: String
+                let savedFiles: [String]
+                let totalBytes: Int64
+                let tarballBytes: Int
+                let hostedDocumentationURL: String?
+            }
+            let manifest = Manifest(
+                owner: package.owner,
+                repo: package.repo,
+                url: package.url,
+                fetchedAt: Date(),
+                cupertinoVersion: Shared.Constants.App.version,
+                branch: result.branch,
+                savedFiles: result.savedFiles,
+                totalBytes: result.totalBytes,
+                tarballBytes: result.tarballBytes,
+                hostedDocumentationURL: hostedURL?.absoluteString
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(manifest)
+            try data.write(to: destination.appendingPathComponent("manifest.json"))
         }
 
         // MARK: - README Download
