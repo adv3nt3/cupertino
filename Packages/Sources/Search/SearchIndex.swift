@@ -27,7 +27,13 @@ extension Search {
         /// - 7: Previous version
         /// - 8: Added attributes column to docs_structured for @attribute indexing
         /// - 9: Added doc_symbols, doc_imports tables for SwiftSyntax AST indexing (#81)
-        public static let schemaVersion: Int32 = 10
+        /// - 10: Added synonyms column to framework_aliases
+        /// - 11: Added kind + symbols columns to docs_metadata (#192 section C). `kind` is
+        ///       the C1 taxonomy (`symbolPage`, `article`, ...) populated by
+        ///       `Search.Classify.kind(...)`. `symbols` is a denormalized text blob of
+        ///       symbol names extracted by the AST pass (section D), held here so bm25
+        ///       can weight on it without a JOIN.
+        public static let schemaVersion: Int32 = 11
 
         private var database: OpaquePointer?
         private let dbPath: URL
@@ -170,6 +176,34 @@ extension Search {
                 // Version 9 -> 10: Added synonyms column to framework_aliases
                 try await migrateToVersion10()
             }
+
+            if currentVersion < 11 {
+                // Version 10 -> 11: Added kind + symbols columns to docs_metadata (#192 C).
+                // Uses ALTER TABLE ADD COLUMN — existing rows get the DEFAULT value
+                // ('unknown' for kind, NULL for symbols). A subsequent re-crawl
+                // repopulates via Classify.kind(...) and the AST pass.
+                try await migrateToVersion11()
+            }
+        }
+
+        private func migrateToVersion11() async throws {
+            guard let database else {
+                throw SearchError.databaseNotInitialized
+            }
+
+            let statements = [
+                "ALTER TABLE docs_metadata ADD COLUMN kind TEXT NOT NULL DEFAULT 'unknown';",
+                "ALTER TABLE docs_metadata ADD COLUMN symbols TEXT;",
+                "CREATE INDEX IF NOT EXISTS idx_kind ON docs_metadata(kind);",
+            ]
+
+            for sql in statements {
+                var errorPointer: UnsafeMutablePointer<CChar>?
+                defer { sqlite3_free(errorPointer) }
+                // Ignore error if column/index already exists — this keeps the
+                // migration idempotent across partial runs.
+                sqlite3_exec(database, sql, nil, nil, &errorPointer)
+            }
         }
 
         private func migrateToVersion10() async throws {
@@ -310,6 +344,8 @@ extension Search {
                 source TEXT NOT NULL DEFAULT 'apple-docs',
                 framework TEXT NOT NULL,
                 language TEXT NOT NULL DEFAULT 'swift',
+                kind TEXT NOT NULL DEFAULT 'unknown',   -- #192 C1 taxonomy
+                symbols TEXT,                            -- #192 D denormalized symbol names
                 file_path TEXT NOT NULL,
                 content_hash TEXT NOT NULL,
                 last_crawled INTEGER NOT NULL,
@@ -330,6 +366,7 @@ extension Search {
             CREATE INDEX IF NOT EXISTS idx_source ON docs_metadata(source);
             CREATE INDEX IF NOT EXISTS idx_framework ON docs_metadata(framework);
             CREATE INDEX IF NOT EXISTS idx_language ON docs_metadata(language);
+            CREATE INDEX IF NOT EXISTS idx_kind ON docs_metadata(kind);
             CREATE INDEX IF NOT EXISTS idx_source_type ON docs_metadata(source_type);
             CREATE INDEX IF NOT EXISTS idx_min_ios ON docs_metadata(min_ios);
             CREATE INDEX IF NOT EXISTS idx_min_macos ON docs_metadata(min_macos);
@@ -991,12 +1028,17 @@ extension Search {
                 finalJsonData = minimalJSON
             }
 
-            // Insert metadata with JSON data and availability
+            // Classify (#192 C1). Direct `indexDocument` callers don't have a
+            // structured-kind hint, so the classifier uses `source` + `uri`.
+            let classifiedKind = Search.Classify.kind(source: source, uriPath: uri).rawValue
+
+            // Insert metadata with JSON data, availability, and kind (#192 C).
+            // `kind` appended at end so existing bind indexes 1-17 stay stable.
             let metaSql = """
             INSERT OR REPLACE INTO docs_metadata \
             (uri, source, framework, language, file_path, content_hash, last_crawled, word_count, \
             source_type, package_id, json_data, min_ios, min_macos, min_tvos, min_watchos, \
-            min_visionos, availability_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            min_visionos, availability_source, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """
 
             var metaStatement: OpaquePointer?
@@ -1032,6 +1074,7 @@ extension Search {
             bindOptionalText(metaStatement, 15, minWatchOS)
             bindOptionalText(metaStatement, 16, minVisionOS)
             bindOptionalText(metaStatement, 17, availabilitySource)
+            sqlite3_bind_text(metaStatement, 18, (classifiedKind as NSString).utf8String, -1, nil)
 
             guard sqlite3_step(metaStatement) == SQLITE_DONE else {
                 let errorMessage = String(cString: sqlite3_errmsg(database))
@@ -1295,12 +1338,21 @@ extension Search {
             let finalVisionOS = overrideMinVisionOS ?? jsonAvailability.visionOS
             let finalSource = overrideAvailabilitySource ?? jsonAvailability.source
 
-            // Insert metadata with json_data and availability columns
+            // Classify (#192 C1). Structured path has `page.kind` available —
+            // pass it plus the URI path for sample-code disambiguation.
+            let classifiedKind = Search.Classify.kind(
+                source: source,
+                structuredKind: page.kind.rawValue,
+                uriPath: uri
+            ).rawValue
+
+            // Insert metadata with json_data, availability, and kind (#192 C).
+            // `kind` appended at end so existing bind indexes 1-16 stay stable.
             let metaSql = """
             INSERT OR REPLACE INTO docs_metadata \
             (uri, source, framework, language, file_path, content_hash, last_crawled, word_count, \
             source_type, json_data, min_ios, min_macos, min_tvos, min_watchos, min_visionos, \
-            availability_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            availability_source, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """
 
             var metaStatement: OpaquePointer?
@@ -1329,6 +1381,7 @@ extension Search {
             bindOptionalText(metaStatement, 14, finalWatchOS)
             bindOptionalText(metaStatement, 15, finalVisionOS)
             bindOptionalText(metaStatement, 16, finalSource)
+            sqlite3_bind_text(metaStatement, 17, (classifiedKind as NSString).utf8String, -1, nil)
 
             guard sqlite3_step(metaStatement) == SQLITE_DONE else {
                 let errorMessage = String(cString: sqlite3_errmsg(database))
