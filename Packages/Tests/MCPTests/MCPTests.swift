@@ -458,7 +458,27 @@ struct ContentBlockTests {
 struct MCPProtocolTypesTests {
     @Test("MCP protocol version is defined")
     func protocolVersionDefined() {
-        #expect(MCPProtocolVersion == "2025-06-18")
+        #expect(MCPProtocolVersion == "2025-11-25")
+    }
+
+    @Test("Supported protocol versions cover the 3-hop negotiation window")
+    func supportedVersionsNegotiation() {
+        // 2025-11-25 = current, 2025-06-18 = previous, 2024-11-05 = legacy.
+        // Order matters: `MCPProtocolVersion` is always first so clients
+        // that ask for "current" get the freshest response.
+        #expect(MCPProtocolVersionsSupported.first == MCPProtocolVersion)
+        #expect(MCPProtocolVersionsSupported.contains("2025-06-18"))
+        #expect(MCPProtocolVersionsSupported.contains("2024-11-05"))
+    }
+
+    @Test("Icon round-trips through Codable")
+    func iconCodable() throws {
+        let icon = Icon(src: "data:image/png;base64,abcd", mimeType: "image/png", sizes: ["64x64"])
+        let data = try JSONEncoder().encode(icon)
+        let decoded = try JSONDecoder().decode(Icon.self, from: data)
+        #expect(decoded.src == icon.src)
+        #expect(decoded.mimeType == "image/png")
+        #expect(decoded.sizes == ["64x64"])
     }
 
     @Test("Implementation type works correctly")
@@ -467,6 +487,7 @@ struct MCPProtocolTypesTests {
 
         #expect(impl.name == "cupertino")
         #expect(impl.version == "1.0.0")
+        #expect(impl.icons == nil)
 
         // Verify Codable
         let encoder = JSONEncoder()
@@ -476,6 +497,28 @@ struct MCPProtocolTypesTests {
 
         #expect(decoded.name == "cupertino")
         #expect(decoded.version == "1.0.0")
+        #expect(decoded.icons == nil)
+    }
+
+    @Test("Implementation carries icons when supplied (MCP 2025-11-25)")
+    func implementationWithIcons() throws {
+        let icon = Icon(src: "data:image/png;base64,zzz", mimeType: "image/png", sizes: ["64x64"])
+        let impl = Implementation(name: "cupertino", version: "1.0.0", icons: [icon])
+
+        let data = try JSONEncoder().encode(impl)
+        let decoded = try JSONDecoder().decode(Implementation.self, from: data)
+
+        #expect(decoded.icons?.count == 1)
+        #expect(decoded.icons?.first?.src == icon.src)
+    }
+
+    @Test("Implementation decodes legacy (pre-2025-11-25) JSON without icons field")
+    func implementationLegacyDecoding() throws {
+        // A 2024-11-05 / 2025-06-18 handshake never emits `icons`. Must decode.
+        let legacyJSON = #"{"name":"old-client","version":"0.1.0"}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(Implementation.self, from: legacyJSON)
+        #expect(decoded.name == "old-client")
+        #expect(decoded.icons == nil)
     }
 
     @Test("ClientCapabilities serializes correctly")

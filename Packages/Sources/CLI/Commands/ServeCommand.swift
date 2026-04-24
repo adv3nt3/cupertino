@@ -63,7 +63,18 @@ struct ServeCommand: AsyncParsableCommand {
             throw ExitCode.failure
         }
 
-        let server = MCPServer(name: Shared.Constants.App.mcpServerName, version: Shared.Constants.App.version)
+        // Advertise the embedded cupertino icon to MCP clients that speak
+        // the 2025-11-25 protocol. Older clients ignore the field.
+        let icon = Icon(
+            src: CupertinoIconEmbedded.dataURI,
+            mimeType: "image/png",
+            sizes: ["64x64"]
+        )
+        let server = MCPServer(
+            name: Shared.Constants.App.mcpServerName,
+            version: Shared.Constants.App.version,
+            icons: [icon]
+        )
 
         await registerProviders(
             server: server,
