@@ -15,8 +15,9 @@ struct CommandRegistrationTests {
     func subcommandsRegistered() {
         let config = Cupertino.configuration
 
-        // 14 visible (adds `ask`) + 2 hidden (package-search, packages-setup).
-        #expect(config.subcommands.count == 16)
+        // 14 visible (adds `ask`) + 1 hidden (package-search). `setup` now
+        // owns every database — packages-setup was collapsed into it.
+        #expect(config.subcommands.count == 15)
         #expect(config.subcommands.contains { $0 == SetupCommand.self })
         #expect(config.subcommands.contains { $0 == FetchCommand.self })
         #expect(config.subcommands.contains { $0 == SaveCommand.self })
@@ -31,7 +32,6 @@ struct CommandRegistrationTests {
         #expect(config.subcommands.contains { $0 == DoctorCommand.self })
         #expect(config.subcommands.contains { $0 == CleanupCommand.self })
         #expect(config.subcommands.contains { $0 == PackageSearchCommand.self })
-        #expect(config.subcommands.contains { $0 == PackagesSetupCommand.self })
         #expect(config.subcommands.contains { $0 == AskCommand.self })
     }
 

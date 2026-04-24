@@ -9,7 +9,7 @@ import Shared
 struct SetupCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "setup",
-        abstract: "Download pre-built search databases from GitHub"
+        abstract: "Download every cupertino database (search.db, samples.db, packages.db) in one go"
     )
 
     @Option(name: .long, help: "Base directory for databases")
@@ -23,6 +23,7 @@ struct SetupCommand: AsyncParsableCommand {
     private static let releaseBaseURL = "https://github.com/mihaelamj/cupertino-docs/releases/download"
     private static let searchDBFilename = Shared.Constants.FileName.searchDatabase
     private static let samplesDBFilename = Shared.Constants.FileName.samplesDatabase
+    private static let packagesDBFilename = Shared.Constants.FileName.packagesIndexDatabase
 
     /// Release tag for database downloads - decoupled from CLI version
     /// Only changes when database schema or content is updated
@@ -65,12 +66,16 @@ struct SetupCommand: AsyncParsableCommand {
             currentVersion: currentVersion
         )
 
+        let packagesDBURL = baseURL.appendingPathComponent(Self.packagesDBFilename)
+        let packagesExists = FileManager.default.fileExists(atPath: packagesDBURL.path)
+
         // --keep-existing: honour whatever is already on disk. Mirrors the old default
         // behaviour; opt-in now since most users running `setup` actually want the latest.
-        if keepExisting, searchExists, samplesExists {
+        if keepExisting, searchExists, samplesExists, packagesExists {
             Logging.ConsoleLogger.info("✅ Databases already exist (keeping them, per --keep-existing)")
             Logging.ConsoleLogger.info("   Documentation: \(searchDBURL.path)")
             Logging.ConsoleLogger.info("   Sample code:   \(samplesDBURL.path)")
+            Logging.ConsoleLogger.info("   Packages:      \(packagesDBURL.path)")
             Self.printVersionStatus(status)
             Logging.ConsoleLogger.info("💡 Start the server with: cupertino serve")
             return
@@ -78,33 +83,61 @@ struct SetupCommand: AsyncParsableCommand {
 
         // Default path: download. Explain whether this is a fresh install, a refresh
         // of the same version, or an upgrade, so the user knows what they're paying for.
-        if searchExists || samplesExists {
+        if searchExists || samplesExists || packagesExists {
             Self.printVersionStatus(status, inForceMode: true)
         } else {
             Logging.ConsoleLogger.info("ℹ️  No databases installed. Downloading v\(currentVersion).\n")
         }
 
-        // Download and extract zip
+        // 1. Docs zip (search.db + samples.db) from cupertino-docs releases.
         let zipURL = baseURL.appendingPathComponent(Self.zipFilename)
         try await downloadFile(
-            name: "Databases",
+            name: "Documentation databases",
             from: "\(Self.releaseURL)/\(Self.zipFilename)",
             to: zipURL
         )
 
-        // Extract zip
-        Logging.ConsoleLogger.info("📂 Extracting databases...")
+        Logging.ConsoleLogger.info("📂 Extracting documentation databases...")
         try await extractZip(at: zipURL, to: baseURL)
-
-        // Remove zip file
         try? FileManager.default.removeItem(at: zipURL)
 
-        // Verify files exist
         guard FileManager.default.fileExists(atPath: searchDBURL.path) else {
             throw SetupError.missingFile(Self.searchDBFilename)
         }
         guard FileManager.default.fileExists(atPath: samplesDBURL.path) else {
             throw SetupError.missingFile(Self.samplesDBFilename)
+        }
+
+        // 2. Packages zip (packages.db) from cupertino-packages releases.
+        // No granularity flag — `setup` is the single command that owns every
+        // database cupertino consumes. If the packages release is missing
+        // (pre-1.0 the companion repo may not be tagged yet), warn but
+        // succeed — cupertino can still serve docs without packages.db.
+        Logging.ConsoleLogger.output("")
+        let packagesVersion = Shared.Constants.App.packagesIndexVersion
+        let packagesZipURL = baseURL.appendingPathComponent(
+            PackagesReleaseURL.makeZipFilename(version: packagesVersion)
+        )
+        let packagesDownloadURL = PackagesReleaseURL.makeDownloadURL(version: packagesVersion)
+
+        do {
+            try await downloadFile(
+                name: "Packages database",
+                from: packagesDownloadURL,
+                to: packagesZipURL
+            )
+            Logging.ConsoleLogger.info("📂 Extracting packages database...")
+            try await extractZip(at: packagesZipURL, to: baseURL)
+            try? FileManager.default.removeItem(at: packagesZipURL)
+            guard FileManager.default.fileExists(atPath: packagesDBURL.path) else {
+                throw SetupError.missingFile(Self.packagesDBFilename)
+            }
+        } catch {
+            Logging.ConsoleLogger.info(
+                "⚠️  Packages database download failed: \(error). " +
+                "cupertino will run without packages search; rerun `cupertino setup` once " +
+                "https://github.com/mihaelamj/cupertino-packages/releases/tag/v\(packagesVersion) is published."
+            )
         }
 
         // Record the version that was just installed (#168) so future setup runs
@@ -117,6 +150,12 @@ struct SetupCommand: AsyncParsableCommand {
         Logging.ConsoleLogger.info("✅ Setup complete!")
         Logging.ConsoleLogger.info("   Documentation: \(searchDBURL.path)")
         Logging.ConsoleLogger.info("   Sample code:   \(samplesDBURL.path)")
+        let packagesNowExists = FileManager.default.fileExists(atPath: packagesDBURL.path)
+        if packagesNowExists {
+            Logging.ConsoleLogger.info("   Packages:      \(packagesDBURL.path)")
+        } else {
+            Logging.ConsoleLogger.info("   Packages:      (not installed — see warning above)")
+        }
         Logging.ConsoleLogger.info("   Version:       \(currentVersion)")
         Logging.ConsoleLogger.info("\n💡 Start the server with: cupertino serve")
     }
