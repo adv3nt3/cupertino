@@ -11,7 +11,7 @@ import Testing
 
 // MARK: - Integration Test Suite
 
-@Suite("MCP Integration Tests", .tags(.integration, .slow))
+@Suite("MCP Integration Tests", .tags(.integration, .slow), .serialized)
 struct MCPIntegrationTests {
     // MARK: - Cupertino Server Tests (Swift-only, no Node.js)
 
@@ -123,7 +123,12 @@ struct MCPIntegrationTests {
         // flaked under full-suite CPU load — the server can take >500 ms to
         // emit the tools list when the machine is busy indexing in parallel,
         // but invariably finishes within a handful of seconds.
-        let deadline = Date().addingTimeInterval(10)
+        // 30s deadline: the server has to read ~/.cupertino/search.db
+        // (potentially triggering the v12 migration throw) and initialise
+        // a few MB of indexed state before emitting tools/list. On a busy
+        // CI box the process-fork + read can exceed 10s. 30s is still a
+        // tight bound on a healthy machine.
+        let deadline = Date().addingTimeInterval(30)
         var buffer = ""
         while Date() < deadline {
             let chunk = stdoutPipe.fileHandleForReading.availableData
