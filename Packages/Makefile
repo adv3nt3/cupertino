@@ -197,6 +197,11 @@ test-integration:
 	$(SWIFT) test --filter "testDownloadRealAppleDocPage"
 	@echo "$(GREEN)✓ Integration tests passed$(RESET)"
 
+## test-clean: Wipe .build and run the full test suite (escape hatch for stale SwiftPM artifacts)
+## Use this when tests crash at stdlib traps that point at code outside the call path.
+## See AGENTS.md "Troubleshooting: stale SwiftPM build".
+test-clean: clean test
+
 ## clean: Clean build artifacts
 clean:
 	@echo "$(BOLD)$(YELLOW)Cleaning build artifacts...$(RESET)"
