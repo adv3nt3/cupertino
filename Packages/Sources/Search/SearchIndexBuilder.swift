@@ -291,12 +291,18 @@ extension Search {
                         jsonData: jsonString
                     )
 
-                    // Index code examples if present
+                    // Index code examples if present (#192 D: also extract AST
+                    // symbols into doc_symbols / doc_imports and the
+                    // denormalised docs_metadata.symbols blob).
                     if !structuredPage.codeExamples.isEmpty {
                         let examples = structuredPage.codeExamples.map {
                             (code: $0.code, language: $0.language ?? "swift")
                         }
                         try await searchIndex.indexCodeExamples(
+                            docUri: uri,
+                            codeExamples: examples
+                        )
+                        try await searchIndex.extractCodeExampleSymbols(
                             docUri: uri,
                             codeExamples: examples
                         )
@@ -730,12 +736,18 @@ extension Search {
                         overrideAvailabilitySource: isSwiftBook ? "universal" : nil
                     )
 
-                    // Index code examples if present
+                    // Index code examples if present (#192 D: also extract AST
+                    // symbols into doc_symbols / doc_imports and the
+                    // denormalised docs_metadata.symbols blob).
                     if !structuredPage.codeExamples.isEmpty {
                         let examples = structuredPage.codeExamples.map {
                             (code: $0.code, language: $0.language ?? "swift")
                         }
                         try await searchIndex.indexCodeExamples(
+                            docUri: uri,
+                            codeExamples: examples
+                        )
+                        try await searchIndex.extractCodeExampleSymbols(
                             docUri: uri,
                             codeExamples: examples
                         )

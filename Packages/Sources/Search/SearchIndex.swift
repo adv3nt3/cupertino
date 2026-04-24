@@ -776,6 +776,80 @@ extension Search {
             }
         }
 
+        /// Extract AST symbols and imports from stored code examples and fold them
+        /// into the existing symbol/import tables + the denormalised `symbols` blob
+        /// on `docs_metadata` (#192 section D).
+        ///
+        /// Only Swift blocks are parsed. Non-Swift blocks are ignored — the
+        /// extractor relies on SwiftSyntax and would just produce empty results.
+        ///
+        /// Call this AFTER `indexCodeExamples(docUri:codeExamples:)` so the
+        /// referenced blocks are already durable. `docs_metadata.symbols` is
+        /// only written when there is at least one unique symbol name.
+        public func extractCodeExampleSymbols(
+            docUri: String,
+            codeExamples: [(code: String, language: String)]
+        ) async throws {
+            guard database != nil else {
+                throw SearchError.databaseNotInitialized
+            }
+
+            let extractor = ASTIndexer.SwiftSourceExtractor()
+            var collectedSymbols: [ASTIndexer.ExtractedSymbol] = []
+            var collectedImports: [ASTIndexer.ExtractedImport] = []
+            var uniqueNames: Set<String> = []
+
+            for example in codeExamples where Self.isSwiftLanguage(example.language) {
+                let result = extractor.extract(from: example.code)
+                collectedSymbols.append(contentsOf: result.symbols)
+                collectedImports.append(contentsOf: result.imports)
+                for symbol in result.symbols {
+                    uniqueNames.insert(symbol.name)
+                }
+            }
+
+            if !collectedSymbols.isEmpty {
+                try await indexDocSymbols(docUri: docUri, symbols: collectedSymbols)
+            }
+            if !collectedImports.isEmpty {
+                try await indexDocImports(docUri: docUri, imports: collectedImports)
+            }
+            if !uniqueNames.isEmpty {
+                try await updateDocSymbolsBlob(docUri: docUri, names: uniqueNames)
+            }
+        }
+
+        /// Update the denormalised `symbols` column on `docs_metadata` with a
+        /// tab-separated, sorted list of unique symbol names. Silent no-op if
+        /// the `docs_metadata` row does not yet exist for `docUri`.
+        private func updateDocSymbolsBlob(docUri: String, names: Set<String>) async throws {
+            guard let database else {
+                throw SearchError.databaseNotInitialized
+            }
+            let blob = names.sorted().joined(separator: "\t")
+
+            let sql = "UPDATE docs_metadata SET symbols = ? WHERE uri = ?;"
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_prepare_v2(database, sql, -1, &stmt, nil) == SQLITE_OK else {
+                return
+            }
+            sqlite3_bind_text(stmt, 1, (blob as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 2, (docUri as NSString).utf8String, -1, nil)
+            _ = sqlite3_step(stmt)
+        }
+
+        /// Classify a code-block language tag as Swift. Accepts the variants
+        /// Apple docs and the Swift book actually ship.
+        private static func isSwiftLanguage(_ language: String) -> Bool {
+            switch language.lowercased() {
+            case "swift", "swift-symbols", "swiftsymbols":
+                return true
+            default:
+                return false
+            }
+        }
+
         /// Search code examples
         public func searchCodeExamples(
             query: String,
