@@ -362,6 +362,198 @@ struct ResumeAndStartCleanTests {
         #expect(resolved != coincidentalForeignDir)
     }
 
+    // MARK: - Cross-machine page path rebasing
+    //
+    // `PageMetadata.filePath` is an absolute string captured on the writing
+    // host. After rsync to a machine with a different home dir, those strings
+    // point at nothing. CrawlerState's load path now rebases them to the
+    // current `metadataFile`'s parent directory + framework + basename, so:
+    //   * `validateMetadata` doesn't false-negative and wipe the saved session
+    //   * `SearchIndexBuilder` reads pages from the right place
+    //   * `DocsResourceProvider` resolves correctly
+
+    private static func writeFixturePagesAndFile(
+        outputDir: URL,
+        framework: String,
+        filename: String,
+        foreignFilePath: String
+    ) throws -> PageMetadata {
+        // Make the actual file on disk under outputDir/framework/.
+        let frameworkDir = outputDir.appendingPathComponent(framework)
+        try FileManager.default.createDirectory(at: frameworkDir, withIntermediateDirectories: true)
+        let filePath = frameworkDir.appendingPathComponent(filename)
+        try Data("{}".utf8).write(to: filePath)
+
+        // PageMetadata records the *foreign* path — same basename / framework
+        // as the on-disk file, but a host-specific absolute prefix.
+        return PageMetadata(
+            url: "https://developer.apple.com/documentation/\(framework)",
+            framework: framework,
+            filePath: foreignFilePath,
+            contentHash: "abc123",
+            depth: 0
+        )
+    }
+
+    @Test("validateMetadata accepts rsynced metadata: foreign filePath but file exists at portable path")
+    func validateMetadataRsynced() async throws {
+        let outputDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+
+        let metadataFile = Self.metadataFile(in: outputDir)
+
+        // Build a metadata fixture: 3 pages whose `filePath` strings are from
+        // a different machine, but whose actual files exist under outputDir.
+        // This is the rsync-from-another-host scenario — exact bug we hit on Claw.
+        var metadata = CrawlMetadata()
+        let frameworks = ["accessibility", "swiftui", "foundation"]
+        for fw in frameworks {
+            let page = try Self.writeFixturePagesAndFile(
+                outputDir: outputDir,
+                framework: fw,
+                filename: "documentation_\(fw).json",
+                foreignFilePath: "/Users/some-other-user/.cupertino/docs/\(fw)/documentation_\(fw).json"
+            )
+            metadata.pages[page.url] = page
+        }
+        try metadata.save(to: metadataFile)
+
+        let result = CrawlerState.validateMetadata(metadata, metadataFile: metadataFile)
+        #expect(result, "validation must pass when the *portable* path (outputDir+framework+basename) resolves, even if filePath strings are foreign")
+    }
+
+    @Test("validateMetadata rejects metadata when no actual files exist (lying metadata)")
+    func validateMetadataRejectsLies() async throws {
+        let outputDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+
+        // 5 page entries, but no files on disk → genuinely lying metadata
+        var metadata = CrawlMetadata()
+        for fw in ["a", "b", "c", "d", "e"] {
+            metadata.pages["https://x/\(fw)"] = PageMetadata(
+                url: "https://x/\(fw)",
+                framework: fw,
+                filePath: "/anywhere/\(fw)/file.json",
+                contentHash: "h",
+                depth: 0
+            )
+        }
+        let metadataFile = Self.metadataFile(in: outputDir)
+        try metadata.save(to: metadataFile)
+
+        let result = CrawlerState.validateMetadata(metadata, metadataFile: metadataFile)
+        #expect(!result, "validation must reject metadata claiming pages that don't exist on this host at all")
+    }
+
+    @Test("rebasePagePaths rewrites foreign filePaths to the current outputDir")
+    func rebasePathsRewrites() async throws {
+        // Use UUID-randomised paths so they're guaranteed not to exist on
+        // the test host — rebasePagePaths only rewrites entries whose saved
+        // path doesn't resolve. (A literal path like /Users/foo/.cupertino
+        // could collide with an actual user's directory and skip the rewrite,
+        // which is the right behavior at runtime but breaks this test.)
+        let foreignRoot = "/__nonexistent-foreign-host-\(UUID().uuidString)"
+        let outputDir = URL(fileURLWithPath: "/__nonexistent-target-host-\(UUID().uuidString)/cupertino/docs")
+        var metadata = CrawlMetadata()
+        metadata.pages["u1"] = PageMetadata(
+            url: "u1",
+            framework: "accessibility",
+            filePath: "\(foreignRoot)/cupertino/docs/accessibility/documentation_accessibility.json",
+            contentHash: "h1",
+            depth: 0
+        )
+        metadata.pages["u2"] = PageMetadata(
+            url: "u2",
+            framework: "swiftui",
+            filePath: "\(foreignRoot)/some/swiftui/documentation_swiftui.json",
+            contentHash: "h2",
+            depth: 0
+        )
+
+        CrawlerState.rebasePagePaths(in: &metadata, to: outputDir)
+
+        let expectedU1 = outputDir.appendingPathComponent("accessibility")
+            .appendingPathComponent("documentation_accessibility.json").path
+        let expectedU2 = outputDir.appendingPathComponent("swiftui")
+            .appendingPathComponent("documentation_swiftui.json").path
+        #expect(metadata.pages["u1"]?.filePath == expectedU1)
+        #expect(metadata.pages["u2"]?.filePath == expectedU2)
+        // Other fields preserved
+        #expect(metadata.pages["u1"]?.contentHash == "h1")
+        #expect(metadata.pages["u2"]?.framework == "swiftui")
+    }
+
+    @Test("rebasePagePaths is idempotent — running twice does not change paths")
+    func rebasePathsIdempotent() async throws {
+        let outputDir = URL(fileURLWithPath: "/Volumes/ClawSSD/.cupertino/docs")
+        var metadata = CrawlMetadata()
+        metadata.pages["u1"] = PageMetadata(
+            url: "u1",
+            framework: "accessibility",
+            filePath: "/Volumes/ClawSSD/.cupertino/docs/accessibility/documentation_accessibility.json",
+            contentHash: "h1",
+            depth: 0
+        )
+
+        CrawlerState.rebasePagePaths(in: &metadata, to: outputDir)
+        let firstPass = metadata.pages["u1"]?.filePath
+        CrawlerState.rebasePagePaths(in: &metadata, to: outputDir)
+        let secondPass = metadata.pages["u1"]?.filePath
+
+        #expect(firstPass == secondPass)
+        #expect(firstPass == "/Volumes/ClawSSD/.cupertino/docs/accessibility/documentation_accessibility.json")
+    }
+
+    @Test("End-to-end rsync scenario: foreign metadata + crawlState loads with full session restored")
+    func crossMachineFullScenario() async throws {
+        let outputDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+
+        let metadataFile = Self.metadataFile(in: outputDir)
+
+        // Stage 1: build a metadata.json that looks like it came from another
+        // host. crawlState marks the session active; pages dict has foreign
+        // filePaths but the actual files exist under outputDir.
+        var metadata = CrawlMetadata()
+        for fw in ["accessibility", "swiftui", "foundation"] {
+            let page = try Self.writeFixturePagesAndFile(
+                outputDir: outputDir,
+                framework: fw,
+                filename: "documentation_\(fw).json",
+                foreignFilePath: "/Users/foreign/.cupertino/docs/\(fw)/documentation_\(fw).json"
+            )
+            metadata.pages[page.url] = page
+        }
+        metadata.crawlState = CrawlSessionState(
+            visited: ["https://developer.apple.com/documentation/accessibility",
+                      "https://developer.apple.com/documentation/swiftui"],
+            queue: [QueuedURL(url: "https://developer.apple.com/documentation/foundation", depth: 0)],
+            startURL: "https://developer.apple.com/documentation/",
+            outputDirectory: "/Users/foreign/.cupertino/docs",
+            sessionStartTime: Date(),
+            lastSaveTime: Date(),
+            isActive: true
+        )
+        try metadata.save(to: metadataFile)
+
+        // Stage 2: a fresh CrawlerState (the post-rsync simulation)
+        let config = Shared.ChangeDetectionConfiguration(
+            metadataFile: metadataFile,
+            outputDirectory: outputDir
+        )
+        let state = CrawlerState(configuration: config)
+
+        // The session must survive — it would have been wiped pre-fix because
+        // validateMetadata couldn't find any files at the foreign paths.
+        let hasSession = await state.hasActiveSession()
+        #expect(hasSession, "post-rsync metadata must keep crawlState alive")
+        let session = await state.getSavedSession()
+        #expect(session?.visited.count == 2)
+        #expect(session?.queue.count == 1)
+        let pageCount = await state.getPageCount()
+        #expect(pageCount == 3)
+    }
+
     @Test("CrawlerState round-trip: save → reload via fresh instance restores all fields")
     func crawlerStateSaveReloadRoundTrip() async throws {
         let tempDir = try Self.makeTempDir()
