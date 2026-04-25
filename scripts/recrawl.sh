@@ -43,19 +43,31 @@ phase_end() {
 }
 
 # ---------- 0. Wipe stale state ----------
-log "Phase 0/10: Wiping stale databases (schema v12 requires fresh DBs)"
+log "Phase 0/10: Wiping stale databases + crawl manifest (schema v12 requires fresh DBs)"
 PHASE_START=$(date +%s)
-for f in search.db samples.db packages.db .setup-version; do
+for f in search.db samples.db packages.db .setup-version metadata.json crawl-debug.log cupertino.log; do
     target="$CUPERTINO_HOME/$f"
     if [[ -e "$target" ]]; then
         echo "   removing $target"
         rm -f "$target"
     fi
 done
+# Wipe the per-source raw output dirs so the new crawl writes fresh JSON
+# rather than mixing with stale pages from a prior schema.
+for d in docs swift-org swift-evolution hig archive sample-code packages; do
+    target="$CUPERTINO_HOME/$d"
+    if [[ -d "$target" ]]; then
+        echo "   wiping $target/"
+        rm -rf "$target"
+    fi
+done
 phase_end "0/10" "Wipe"
 
 # ---------- 1-7. Web + direct fetches in dependency-friendly order ----------
 phase_start "1/10" "Apple Developer Documentation (largest, ~hours)"
+# `fetch --type docs` is now a two-pass crawl by default: JSON API first
+# (fast), WKWebView second to fill JSON-endpoint gaps. No flags needed —
+# see FetchCommand.runDocsTwoPassCrawl().
 "$BIN" fetch --type docs
 phase_end "1/10" "Apple Developer Documentation"
 
