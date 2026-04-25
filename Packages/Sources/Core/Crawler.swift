@@ -229,6 +229,14 @@ extension Core {
             // Check if this URL could have a JSON API endpoint (Apple docs)
             let hasJSONEndpoint = AppleJSONToMarkdown.jsonAPIURL(from: url) != nil
 
+            // The HTML→markdown / link extraction calls below are synchronous
+            // and allocate heavily through Foundation (NSString operations,
+            // regex, JSON parsing). Wrap each in `autoreleasepool` so the
+            // ephemeral NSObject buffers get released at the end of every
+            // page instead of accumulating until the Task ends — critical for
+            // multi-day crawls (e.g. v1.0 320k corpus on Claw Mini) where
+            // the implicit Task-scoped pool would otherwise hoard megabytes
+            // of pool buffers per thousand pages.
             if hasJSONEndpoint {
                 do {
                     (structuredPage, markdown, links) = try await loadPageViaJSON(url: url)
@@ -236,16 +244,24 @@ extension Core {
                     // JSON API failed, fall back to HTML
                     logInfo("   ⚠️ JSON API unavailable, using HTML fallback")
                     let html = try await loadPage(url: url)
-                    markdown = HTMLToMarkdown.convert(html, url: url)
-                    links = extractLinks(from: html, baseURL: url)
-                    structuredPage = HTMLToMarkdown.toStructuredPage(html, url: url)
+                    (markdown, links, structuredPage) = autoreleasepool {
+                        (
+                            HTMLToMarkdown.convert(html, url: url),
+                            extractLinks(from: html, baseURL: url),
+                            HTMLToMarkdown.toStructuredPage(html, url: url)
+                        )
+                    }
                 }
             } else {
                 // No JSON endpoint available, use HTML directly
                 let html = try await loadPage(url: url)
-                markdown = HTMLToMarkdown.convert(html, url: url)
-                links = extractLinks(from: html, baseURL: url)
-                structuredPage = HTMLToMarkdown.toStructuredPage(html, url: url)
+                (markdown, links, structuredPage) = autoreleasepool {
+                    (
+                        HTMLToMarkdown.convert(html, url: url),
+                        extractLinks(from: html, baseURL: url),
+                        HTMLToMarkdown.toStructuredPage(html, url: url)
+                    )
+                }
             }
 
             // Compute content hash from structured page or markdown
@@ -362,17 +378,19 @@ extension Core {
                 throw CrawlerError.invalidHTML
             }
 
-            // Create structured page from JSON
-            let structuredPage = AppleJSONToMarkdown.toStructuredPage(data, url: url)
-
-            // Also create markdown for backwards compatibility
-            guard let markdown = AppleJSONToMarkdown.convert(data, url: url) else {
-                throw CrawlerError.invalidHTML
+            // Wrap the synchronous JSON parsing in `autoreleasepool` so the
+            // NSData / NSDictionary / NSString buffers Foundation allocates
+            // during decode get released at the end of this page instead of
+            // accumulating in the implicit Task-scoped pool. See the comment
+            // in the main crawl loop for the multi-day-crawl rationale.
+            return try autoreleasepool {
+                let structuredPage = AppleJSONToMarkdown.toStructuredPage(data, url: url)
+                guard let markdown = AppleJSONToMarkdown.convert(data, url: url) else {
+                    throw CrawlerError.invalidHTML
+                }
+                let links = AppleJSONToMarkdown.extractLinks(from: data)
+                return (structuredPage, markdown, links)
             }
-
-            let links = AppleJSONToMarkdown.extractLinks(from: data)
-
-            return (structuredPage, markdown, links)
         }
 
         private func loadPage(url: URL) async throws -> String {
