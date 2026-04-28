@@ -832,11 +832,22 @@ public enum HashUtilities {
 
 /// Utilities for URL manipulation
 public enum URLUtilities {
-    /// Normalize a URL (remove hash, query params)
+    /// Normalize a URL: strip fragment and query, lowercase the path.
+    /// Apple's docs server is case-insensitive on the path
+    /// (`/documentation/Cinematic/CNAssetInfo-2ata2` and the all-lowercase
+    /// form return the same content), so dedup logic must treat them as one
+    /// page (#200). Dash-vs-underscore framework variants
+    /// (`professional-video-applications` ↔ `professional_video_applications`)
+    /// are NOT collapsed here because at least one Apple framework
+    /// (`installer_js`) legitimately uses underscore in its path; that axis
+    /// is handled at the search-index save layer instead.
     public static func normalize(_ url: URL) -> URL? {
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         components?.fragment = nil
         components?.query = nil
+        if let path = components?.path {
+            components?.path = path.lowercased()
+        }
         return components?.url
     }
 

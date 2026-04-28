@@ -683,3 +683,33 @@ func withContentHashPreservesFields() {
     #expect(stamped.crawledAt == original.crawledAt)
     #expect(stamped.abstract == original.abstract)
 }
+
+// MARK: - URL canonicalization (#200)
+
+@Test("URLUtilities.normalize lowercases the path, strips fragment and query")
+func normalizeLowercasesPathAndStripsFragmentQuery() {
+    let mixed = URL(string: "https://developer.apple.com/documentation/Cinematic/CNAssetInfo-2ata2?lang=en#topic")!
+    let lower = URL(string: "https://developer.apple.com/documentation/cinematic/cnassetinfo-2ata2")!
+    #expect(URLUtilities.normalize(mixed) == URLUtilities.normalize(lower))
+    #expect(
+        URLUtilities.normalize(mixed)?.absoluteString
+            == "https://developer.apple.com/documentation/cinematic/cnassetinfo-2ata2"
+    )
+}
+
+@Test("URLUtilities.normalize is idempotent")
+func normalizeIsIdempotent() {
+    let url = URL(string: "https://developer.apple.com/documentation/SwiftUI/View")!
+    let once = URLUtilities.normalize(url)!
+    let twice = URLUtilities.normalize(once)!
+    #expect(once == twice)
+}
+
+@Test("URLUtilities.normalize preserves underscores in legitimate Apple framework names")
+func normalizePreservesUnderscoresInPath() {
+    // installer_js is a real Apple framework that uses underscore in its
+    // canonical URL path. Normalize must not collapse it.
+    let url = URL(string: "https://developer.apple.com/documentation/installer_js/system")!
+    let normalized = URLUtilities.normalize(url)
+    #expect(normalized?.absoluteString == "https://developer.apple.com/documentation/installer_js/system")
+}
