@@ -67,10 +67,6 @@ actor MCPClient {
     private var messageID = 0
     private let externalServerCommand: [String]?
     private let quiet: Bool
-    /// Accumulate raw bytes — decoding to String per chunk drops any chunk that
-    /// straddles a multi-byte UTF-8 boundary, corrupting responses larger than
-    /// the pipe buffer (~32 KB). Decode only when we extract a complete line.
-    private var responseBuffer = Data()
     private var pendingResponses: [CheckedContinuation<String, Error>] = []
 
     init(externalServerCommand: [String]? = nil, quiet: Bool = false) {
@@ -158,14 +154,19 @@ actor MCPClient {
         stdin = stdinPipe.fileHandleForWriting
         stdout = stdoutPipe.fileHandleForReading
 
-        // Set up readability handler for stdout (streaming reads).
-        // Forward raw bytes; decoding is deferred to line boundaries to avoid
-        // dropping chunks split mid UTF-8 character.
-        stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty else { return }
-            Task {
-                await self?.handleIncomingData(data)
+        // Stream stdout as ordered, complete lines via bytes.lines. The
+        // previous readabilityHandler approach spawned a fresh Task per
+        // chunk, so chunks could be processed on the actor out of order
+        // when the response straddled the pipe buffer (~32 KB). bytes.lines
+        // delivers lines in arrival order with internal buffering that
+        // handles UTF-8 boundaries correctly.
+        Task { [weak self] in
+            do {
+                for try await line in stdoutPipe.fileHandleForReading.bytes.lines {
+                    await self?.handleLine(line)
+                }
+            } catch {
+                // pipe closed or read failed — server has exited.
             }
         }
 
@@ -603,30 +604,16 @@ actor MCPClient {
         stdin.write(messageData)
     }
 
-    private func handleIncomingData(_ chunk: Data) {
-        // Append raw bytes; only decode at newline boundaries.
-        responseBuffer.append(chunk)
+    private func handleLine(_ line: String) {
+        if line.trimmingCharacters(in: .whitespaces).isEmpty {
+            return
+        }
 
-        let newline: UInt8 = 0x0A
-        while let newlineIndex = responseBuffer.firstIndex(of: newline) {
-            let lineData = responseBuffer.prefix(upTo: newlineIndex)
-            responseBuffer.removeSubrange(...newlineIndex)
-
-            guard let line = String(data: lineData, encoding: .utf8) else {
-                // Should not happen at a true line boundary; skip if it does.
-                continue
-            }
-
-            if line.trimmingCharacters(in: .whitespaces).isEmpty {
-                continue
-            }
-
-            if !pendingResponses.isEmpty {
-                let continuation = pendingResponses.removeFirst()
-                continuation.resume(returning: line)
-            } else {
-                print("⚠️  Received unexpected line: \(line.prefix(100))...")
-            }
+        if !pendingResponses.isEmpty {
+            let continuation = pendingResponses.removeFirst()
+            continuation.resume(returning: line)
+        } else {
+            print("⚠️  Received unexpected line: \(line.prefix(100))...")
         }
     }
 
