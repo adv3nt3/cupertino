@@ -261,6 +261,211 @@ struct ResumeAndStartCleanTests {
         #expect(after.crawlState?.visited.contains("https://developer.apple.com/documentation/swiftui/view") == true)
     }
 
+    // MARK: - --baseline
+
+    /// Write a fake baseline file with a `url` field at <dir>/<framework>/<slug>.json.
+    private static func writeBaselineFile(
+        in dir: URL,
+        framework: String,
+        slug: String,
+        url: String
+    ) throws {
+        let frameworkDir = dir.appendingPathComponent(framework)
+        try FileManager.default.createDirectory(at: frameworkDir, withIntermediateDirectories: true)
+        let file = frameworkDir.appendingPathComponent("\(slug).json")
+        let payload = "{ \"url\": \"\(url)\" }"
+        try payload.write(to: file, atomically: true, encoding: .utf8)
+    }
+
+    @Test("--baseline injects URLs that exist in baseline but not in claw's known set")
+    func baselineInjectsMissingURLs() async throws {
+        let tempDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let baselineDir = tempDir.appendingPathComponent("baseline")
+        try FileManager.default.createDirectory(at: baselineDir, withIntermediateDirectories: true)
+        try Self.writeBaselineFile(
+            in: baselineDir,
+            framework: "swift",
+            slug: "array",
+            url: "https://developer.apple.com/documentation/swift/array"
+        )
+        try Self.writeBaselineFile(
+            in: baselineDir,
+            framework: "swift",
+            slug: "dictionary",
+            url: "https://developer.apple.com/documentation/swift/dictionary"
+        )
+        try Self.writeBaselineFile(
+            in: baselineDir,
+            framework: "uikit",
+            slug: "view",
+            url: "https://developer.apple.com/documentation/uikit/view"
+        )
+
+        // Claw already has /swift/array; the other 2 should get injected.
+        try Self.writeFixtureWithErroredPages(
+            at: Self.metadataFile(in: tempDir),
+            outputDirectory: tempDir.path,
+            savedURLs: ["https://developer.apple.com/documentation/swift/array"],
+            erroredURLs: []
+        )
+
+        try FetchCommand.requeueFromBaseline(at: tempDir, baselineDir: baselineDir, maxDepth: 15)
+
+        let after = try CrawlMetadata.load(from: Self.metadataFile(in: tempDir))
+        let queueURLs = Set(after.crawlState?.queue.map(\.url) ?? [])
+        #expect(queueURLs.count == 2)
+        #expect(queueURLs.contains("https://developer.apple.com/documentation/swift/dictionary"))
+        #expect(queueURLs.contains("https://developer.apple.com/documentation/uikit/view"))
+        #expect(after.crawlState?.queue.allSatisfy { $0.depth == 15 } == true)
+    }
+
+    @Test("--baseline matching is case-insensitive on the documentation path")
+    func baselineCaseInsensitiveMatching() async throws {
+        let tempDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let baselineDir = tempDir.appendingPathComponent("baseline")
+        try FileManager.default.createDirectory(at: baselineDir, withIntermediateDirectories: true)
+        // Baseline has the capitalized form (HTML-extractor output)
+        try Self.writeBaselineFile(
+            in: baselineDir,
+            framework: "swift",
+            slug: "array",
+            url: "https://developer.apple.com/documentation/Swift/Array"
+        )
+
+        // Claw has the lowercase form (JSON-extractor output)
+        try Self.writeFixtureWithErroredPages(
+            at: Self.metadataFile(in: tempDir),
+            outputDirectory: tempDir.path,
+            savedURLs: ["https://developer.apple.com/documentation/swift/array"],
+            erroredURLs: []
+        )
+
+        try FetchCommand.requeueFromBaseline(at: tempDir, baselineDir: baselineDir, maxDepth: 15)
+
+        let after = try CrawlMetadata.load(from: Self.metadataFile(in: tempDir))
+        // Already known case-insensitively → should NOT be injected.
+        #expect(
+            after.crawlState?.queue.isEmpty == true,
+            "case-insensitive match should treat /Swift/Array == /swift/array as the same URL"
+        )
+    }
+
+    @Test("--baseline is a no-op when baseline directory doesn't exist")
+    func baselineMissingDirectoryIsNoOp() async throws {
+        let tempDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        try Self.writeFixtureWithErroredPages(
+            at: Self.metadataFile(in: tempDir),
+            outputDirectory: tempDir.path,
+            savedURLs: ["https://developer.apple.com/documentation/swift/array"],
+            erroredURLs: []
+        )
+
+        let nonExistent = tempDir.appendingPathComponent("nope")
+        try FetchCommand.requeueFromBaseline(at: tempDir, baselineDir: nonExistent, maxDepth: 15)
+
+        let after = try CrawlMetadata.load(from: Self.metadataFile(in: tempDir))
+        #expect(after.crawlState?.queue.isEmpty == true)
+    }
+
+    @Test("--baseline is a no-op when baseline is empty")
+    func baselineEmptyDirectoryIsNoOp() async throws {
+        let tempDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let baselineDir = tempDir.appendingPathComponent("baseline")
+        try FileManager.default.createDirectory(at: baselineDir, withIntermediateDirectories: true)
+        try Self.writeFixtureWithErroredPages(
+            at: Self.metadataFile(in: tempDir),
+            outputDirectory: tempDir.path,
+            savedURLs: ["https://developer.apple.com/documentation/swift/array"],
+            erroredURLs: []
+        )
+
+        try FetchCommand.requeueFromBaseline(at: tempDir, baselineDir: baselineDir, maxDepth: 15)
+        let after = try CrawlMetadata.load(from: Self.metadataFile(in: tempDir))
+        #expect(after.crawlState?.queue.isEmpty == true)
+    }
+
+    @Test("--baseline skips files without a url field and non-JSON files")
+    func baselineSkipsMalformedFiles() async throws {
+        let tempDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let baselineDir = tempDir.appendingPathComponent("baseline")
+        let frameworkDir = baselineDir.appendingPathComponent("swift")
+        try FileManager.default.createDirectory(at: frameworkDir, withIntermediateDirectories: true)
+        // Valid file
+        try Self.writeBaselineFile(
+            in: baselineDir,
+            framework: "swift",
+            slug: "array",
+            url: "https://developer.apple.com/documentation/swift/array"
+        )
+        // No-url JSON
+        try "{ \"title\": \"no url here\" }".write(
+            to: frameworkDir.appendingPathComponent("nourl.json"),
+            atomically: true, encoding: .utf8
+        )
+        // Non-JSON file
+        try "<html></html>".write(
+            to: frameworkDir.appendingPathComponent("page.html"),
+            atomically: true, encoding: .utf8
+        )
+
+        try Self.writeFixtureWithErroredPages(
+            at: Self.metadataFile(in: tempDir),
+            outputDirectory: tempDir.path,
+            savedURLs: [],
+            erroredURLs: []
+        )
+
+        try FetchCommand.requeueFromBaseline(at: tempDir, baselineDir: baselineDir, maxDepth: 15)
+
+        let after = try CrawlMetadata.load(from: Self.metadataFile(in: tempDir))
+        let queueURLs = (after.crawlState?.queue ?? []).map(\.url)
+        #expect(queueURLs == ["https://developer.apple.com/documentation/swift/array"])
+    }
+
+    @Test("--baseline injected items are prepended (queue front), not appended")
+    func baselinePrependsToQueueFront() async throws {
+        let tempDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let baselineDir = tempDir.appendingPathComponent("baseline")
+        try FileManager.default.createDirectory(at: baselineDir, withIntermediateDirectories: true)
+        try Self.writeBaselineFile(
+            in: baselineDir,
+            framework: "swift",
+            slug: "array",
+            url: "https://developer.apple.com/documentation/swift/array"
+        )
+
+        // Pre-populate queue with an existing item
+        try Self.writeFixtureMetadata(
+            at: Self.metadataFile(in: tempDir),
+            startURL: "https://example.com/seed",
+            outputDirectory: tempDir.path,
+            visited: [],
+            queue: [(url: "https://developer.apple.com/documentation/uikit/already-queued", depth: 0)]
+        )
+
+        try FetchCommand.requeueFromBaseline(at: tempDir, baselineDir: baselineDir, maxDepth: 15)
+
+        let after = try CrawlMetadata.load(from: Self.metadataFile(in: tempDir))
+        let queue = after.crawlState?.queue ?? []
+        #expect(queue.count == 2)
+        #expect(
+            queue.first?.url == "https://developer.apple.com/documentation/swift/array",
+            "baseline-injected URLs must be at the FRONT of the queue, not the back"
+        )
+    }
+
     @Test("--retry-errors gracefully handles missing crawlState")
     func retryErrorsHandlesMissingCrawlState() async throws {
         let tempDir = try Self.makeTempDir()
