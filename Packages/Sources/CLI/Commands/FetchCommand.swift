@@ -94,6 +94,18 @@ struct FetchCommand: AsyncParsableCommand {
     @Option(
         name: .long,
         help: """
+        Path to a text file containing one URL per line. Each URL is \
+        enqueued at maxDepth (so children aren't re-discovered). Useful \
+        for fetching a fixed list — e.g. URLs another corpus has but this \
+        one is missing — without re-spidering. Lines starting with '#' \
+        and blank lines are ignored. (#210)
+        """
+    )
+    var urls: String?
+
+    @Option(
+        name: .long,
+        help: """
         Discovery mode: \
         auto (default — JSON API primary, WKWebView fallback when JSON 404s), \
         json-only (JSON only, no WKWebView fallback — fastest, narrowest), \
@@ -266,6 +278,15 @@ struct FetchCommand: AsyncParsableCommand {
             let baselineURL = URL(fileURLWithPath: baselinePath).expandingTildeInPath
             try Self.requeueFromBaseline(at: outputDirectory, baselineDir: baselineURL, maxDepth: maxDepth)
         }
+        if let urlsPath = urls {
+            let urlsURL = URL(fileURLWithPath: urlsPath).expandingTildeInPath
+            try Self.enqueueURLsFromFile(
+                at: outputDirectory,
+                urlsFile: urlsURL,
+                maxDepth: maxDepth,
+                startURL: url
+            )
+        }
         let config = createConfiguration(url: url, outputDirectory: outputDirectory)
         try await executeCrawl(with: config)
     }
@@ -404,6 +425,74 @@ struct FetchCommand: AsyncParsableCommand {
         Logging.ConsoleLogger.info(
             "🩹 --baseline: prepended \(missing.count) missing URL(s) "
                 + "from \(baselineURLs.count)-URL baseline at depth \(maxDepth)"
+        )
+    }
+
+    /// Enqueue every URL listed in `urlsFile` (one URL per line) at
+    /// `maxDepth` so children aren't re-discovered. Lines starting with
+    /// `#` and blank lines are ignored. Initialises `crawlState` if
+    /// missing so the helper works against a fresh corpus too. (#210)
+    ///
+    /// `internal static` so tests can exercise it directly.
+    static func enqueueURLsFromFile(
+        at outputDirectory: URL,
+        urlsFile: URL,
+        maxDepth: Int,
+        startURL: URL
+    ) throws {
+        let lines = try String(contentsOf: urlsFile, encoding: .utf8)
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+
+        guard !lines.isEmpty else {
+            Logging.ConsoleLogger.info("📥 --urls: file \(urlsFile.path) had no URLs to enqueue")
+            return
+        }
+
+        // Validate each line is a usable URL with a scheme. URL(string:) is
+        // permissive and accepts bare words ("foo bar") as relative URLs;
+        // the scheme check rejects those without rejecting common variants
+        // we accept (http, https, file, etc.).
+        var validURLs: [String] = []
+        for raw in lines {
+            guard let parsed = URL(string: raw),
+                  let scheme = parsed.scheme,
+                  !scheme.isEmpty
+            else {
+                throw FetchURLsError.invalidURL(line: raw)
+            }
+            validURLs.append(raw)
+        }
+
+        let metadataFile = outputDirectory.appendingPathComponent(Shared.Constants.FileName.metadata)
+        try FileManager.default.createDirectory(
+            at: outputDirectory,
+            withIntermediateDirectories: true
+        )
+
+        var metadata: CrawlMetadata
+        if FileManager.default.fileExists(atPath: metadataFile.path) {
+            metadata = try CrawlMetadata.load(from: metadataFile)
+        } else {
+            metadata = CrawlMetadata()
+        }
+
+        var crawlState = metadata.crawlState ?? CrawlSessionState(
+            startURL: startURL.absoluteString,
+            outputDirectory: outputDirectory.path
+        )
+
+        // Append at maxDepth so children aren't re-queued — same approach
+        // as --retry-errors and --baseline.
+        let newItems = validURLs.map { QueuedURL(url: $0, depth: maxDepth) }
+        crawlState.queue = newItems + crawlState.queue
+        crawlState.lastSaveTime = Date()
+        metadata.crawlState = crawlState
+        try metadata.save(to: metadataFile)
+
+        Logging.ConsoleLogger.info(
+            "📥 --urls: enqueued \(validURLs.count) URL(s) from \(urlsFile.lastPathComponent) at depth \(maxDepth)"
         )
     }
 
@@ -1046,6 +1135,19 @@ struct FetchCommand: AsyncParsableCommand {
         Logging.ConsoleLogger.info("   Success rate: \(String(format: "%.1f", stats.successRate))%")
         if let duration = stats.duration {
             Logging.ConsoleLogger.info("   Duration: \(Int(duration))s")
+        }
+    }
+}
+
+// MARK: - --urls errors (#210)
+
+enum FetchURLsError: Error, LocalizedError {
+    case invalidURL(line: String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .invalidURL(line):
+            return "--urls: cannot parse URL from line: \(line)"
         }
     }
 }

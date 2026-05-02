@@ -948,4 +948,157 @@ struct ResumeAndStartCleanTests {
         #expect(session?.queue.count == 2)
         #expect(session?.startURL == "http://127.0.0.1:1/seed")
     }
+
+    // MARK: - --urls (#210)
+
+    private static let seedURL = URL(string: "https://developer.apple.com/documentation/")!
+
+    private static func writeURLsFile(in dir: URL, lines: [String]) throws -> URL {
+        let file = dir.appendingPathComponent("urls.txt")
+        try lines.joined(separator: "\n").write(to: file, atomically: true, encoding: .utf8)
+        return file
+    }
+
+    @Test("--urls enqueues every URL at maxDepth into a fresh corpus")
+    func urlsEnqueuesIntoFreshCorpus() async throws {
+        let tempDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let urlsFile = try Self.writeURLsFile(in: tempDir, lines: [
+            "https://developer.apple.com/documentation/swiftui",
+            "https://developer.apple.com/documentation/visionos",
+            "https://developer.apple.com/documentation/accessibility",
+        ])
+
+        try FetchCommand.enqueueURLsFromFile(
+            at: tempDir,
+            urlsFile: urlsFile,
+            maxDepth: 15,
+            startURL: Self.seedURL
+        )
+
+        let metadata = try CrawlMetadata.load(from: Self.metadataFile(in: tempDir))
+        #expect(metadata.crawlState != nil)
+        let queue = metadata.crawlState?.queue ?? []
+        #expect(queue.count == 3)
+        #expect(queue.allSatisfy { $0.depth == 15 })
+        let queuedURLs = Set(queue.map(\.url))
+        #expect(queuedURLs.contains("https://developer.apple.com/documentation/swiftui"))
+        #expect(queuedURLs.contains("https://developer.apple.com/documentation/visionos"))
+        #expect(queuedURLs.contains("https://developer.apple.com/documentation/accessibility"))
+    }
+
+    @Test("--urls skips blank lines and # comments")
+    func urlsSkipsBlanksAndComments() async throws {
+        let tempDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let urlsFile = try Self.writeURLsFile(in: tempDir, lines: [
+            "# top-level frameworks rate-limited during 2026-04-30 crawl",
+            "",
+            "https://developer.apple.com/documentation/swiftui",
+            "  # indented comment",
+            "https://developer.apple.com/documentation/visionos",
+            "",
+            "  ",
+        ])
+
+        try FetchCommand.enqueueURLsFromFile(
+            at: tempDir,
+            urlsFile: urlsFile,
+            maxDepth: 15,
+            startURL: Self.seedURL
+        )
+
+        let metadata = try CrawlMetadata.load(from: Self.metadataFile(in: tempDir))
+        #expect(metadata.crawlState?.queue.count == 2)
+    }
+
+    @Test("--urls prepends to an existing crawlState queue")
+    func urlsPrependsToExistingQueue() async throws {
+        let tempDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let metaFile = Self.metadataFile(in: tempDir)
+        try Self.writeFixtureMetadata(
+            at: metaFile,
+            startURL: Self.seedURL.absoluteString,
+            outputDirectory: tempDir.path,
+            visited: [],
+            queue: [
+                (url: "https://developer.apple.com/documentation/existing-1", depth: 0),
+                (url: "https://developer.apple.com/documentation/existing-2", depth: 1),
+            ]
+        )
+
+        let urlsFile = try Self.writeURLsFile(in: tempDir, lines: [
+            "https://developer.apple.com/documentation/new-a",
+            "https://developer.apple.com/documentation/new-b",
+        ])
+
+        try FetchCommand.enqueueURLsFromFile(
+            at: tempDir,
+            urlsFile: urlsFile,
+            maxDepth: 15,
+            startURL: Self.seedURL
+        )
+
+        let metadata = try CrawlMetadata.load(from: metaFile)
+        let queue = metadata.crawlState?.queue ?? []
+        #expect(queue.count == 4)
+        // New URLs at the front
+        #expect(queue[0].url.contains("new-a"))
+        #expect(queue[0].depth == 15)
+        #expect(queue[1].url.contains("new-b"))
+        // Existing URLs preserved at the tail with original depths
+        #expect(queue[2].url.contains("existing-1"))
+        #expect(queue[2].depth == 0)
+        #expect(queue[3].url.contains("existing-2"))
+    }
+
+    @Test("--urls throws on a malformed line")
+    func urlsThrowsOnInvalidLine() async throws {
+        let tempDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let urlsFile = try Self.writeURLsFile(in: tempDir, lines: [
+            "https://developer.apple.com/documentation/swiftui",
+            "not a url at all just a bare phrase",
+        ])
+
+        var threw = false
+        do {
+            try FetchCommand.enqueueURLsFromFile(
+                at: tempDir,
+                urlsFile: urlsFile,
+                maxDepth: 15,
+                startURL: Self.seedURL
+            )
+        } catch is FetchURLsError {
+            threw = true
+        }
+        #expect(threw, "expected FetchURLsError on malformed input")
+    }
+
+    @Test("--urls is a no-op when the file has only blanks and comments")
+    func urlsIsNoOpForEmptyEffectiveContent() async throws {
+        let tempDir = try Self.makeTempDir()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let urlsFile = try Self.writeURLsFile(in: tempDir, lines: [
+            "# nothing to see here",
+            "",
+            "  # also a comment",
+        ])
+
+        try FetchCommand.enqueueURLsFromFile(
+            at: tempDir,
+            urlsFile: urlsFile,
+            maxDepth: 15,
+            startURL: Self.seedURL
+        )
+
+        // Should NOT have created a metadata file as a side effect.
+        #expect(!FileManager.default.fileExists(atPath: Self.metadataFile(in: tempDir).path))
+    }
 }
