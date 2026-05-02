@@ -206,10 +206,18 @@ extension Core {
 
             for attempt in 0...maxRetries {
                 if attempt > 0 {
-                    logInfo("🔄 Retry \(attempt)/\(maxRetries) for \(url.lastPathComponent) - recycling WebView")
+                    // Exponential backoff (#209): 1s, 3s, 9s for attempts 1/2/3.
+                    // Apple's JSON API rate-limits hot framework prefixes for
+                    // longer than the prior fixed 1-second pause; widening the
+                    // gap between attempts lets all 3 retries land in different
+                    // rate-limit windows. 2026-04-30 empirical: 187 of 192
+                    // crawl-time failures recovered on a same-URL retry pass
+                    // minutes later, confirming the rate-limit-burst hypothesis.
+                    let delay = Shared.Constants.Delay.retryBackoff(attempt: attempt)
+                    let last = url.lastPathComponent
+                    logInfo("🔄 Retry \(attempt)/\(maxRetries) for \(last) — waiting \(delay), recycling WebView")
                     await recycleWebView()
-                    // Brief pause before retry
-                    try await Task.sleep(for: Shared.Constants.Delay.retryPause)
+                    try await Task.sleep(for: delay)
                 }
 
                 do {

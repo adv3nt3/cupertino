@@ -1064,9 +1064,57 @@ extension Shared {
             /// Rationale: Respectful crawling of Apple's archive servers
             public static let archivePage: Duration = .milliseconds(500)
 
-            /// Pause before retry after failure
-            /// Rationale: Allow transient issues to resolve
+            /// Base pause before retry after failure. Used as the base for
+            /// exponential backoff (1s → 3s → 9s …) so successive retries
+            /// span enough time to outlast typical Apple JSON-API rate-limit
+            /// bursts (#209). The original 2026-04-30 recrawl saw 192/360k
+            /// pages fail at fixed 1-second intervals; a retry minutes later
+            /// recovered 187/192 — confirming the failures were rate-limit
+            /// windows the fixed delay never escaped.
             public static let retryPause: Duration = .seconds(1)
+
+            /// Multiplier for exponential retry backoff (#209). With base
+            /// 1s and multiplier 3, attempts wait 1s, 3s, 9s — total 13s of
+            /// retry-window coverage instead of the previous 3s.
+            public static let retryBackoffMultiplier: Double = 3.0
+
+            /// Cap on a single retry sleep (#209). Prevents runaway sleeps
+            /// if maxRetries is ever bumped well past 3.
+            public static let retryBackoffMax: Duration = .seconds(30)
+
+            /// Compute the sleep duration for the n-th retry (1-indexed):
+            /// `base * multiplier^(attempt - 1)`, capped at `retryBackoffMax`.
+            ///
+            /// With defaults (base 1s, multiplier 3): attempt 1 → 1s,
+            /// attempt 2 → 3s, attempt 3 → 9s. Total wait across 3 retries:
+            /// 13s — long enough to outlast typical Apple rate-limit bursts
+            /// (#209). Returns `.zero` for attempt < 1 so the helper is
+            /// safe to call unconditionally.
+            public static func retryBackoff(
+                attempt: Int,
+                base: Duration = retryPause,
+                multiplier: Double = retryBackoffMultiplier,
+                maxDelay: Duration = retryBackoffMax
+            ) -> Duration {
+                guard attempt >= 1 else { return .zero }
+
+                // Reduce the base Duration to a Double of seconds so we can
+                // multiply by `multiplier^(attempt-1)`. Foundation's Duration
+                // doesn't expose direct fractional-second multiplication.
+                let parts = base.components
+                let baseSeconds = Double(parts.seconds) + Double(parts.attoseconds) / 1e18
+                let factor = pow(multiplier, Double(attempt - 1))
+                let computed = baseSeconds * factor
+
+                let capParts = maxDelay.components
+                let capSeconds = Double(capParts.seconds) + Double(capParts.attoseconds) / 1e18
+
+                let bounded = min(computed, capSeconds)
+                let wholeSeconds = Int64(bounded)
+                let fractional = bounded - Double(wholeSeconds)
+                let attoseconds = Int64(fractional * 1e18)
+                return Duration(secondsComponent: wholeSeconds, attosecondsComponent: attoseconds)
+            }
         }
 
         /// Timeout values for operations
@@ -1292,7 +1340,7 @@ extension Shared {
             /// so a default crawl runs to queue exhaustion rather than hitting
             /// an artificial limit. Override with `--max-pages` if you need a
             /// smaller bounded crawl for testing.
-            public static let defaultMaxPages = 1_000_000
+            public static let defaultMaxPages = 1000000
 
             // MARK: File Size Limits
 
