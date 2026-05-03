@@ -50,6 +50,8 @@ def emit_raw(json_path: pathlib.Path, out_path: pathlib.Path) -> None:
         f'// Auto-generated from {json_path.name}. Do not edit by hand.\n'
         f'// Regenerate via: Scripts/generate-embedded-catalogs.sh\n\n'
         f'import Foundation\n\n'
+        f'// swiftlint:disable line_length type_body_length file_length\n'
+        f'// Auto-generated raw-string-literal catalog; lint thresholds don\'t apply.\n\n'
         f'public enum {sym_name} {{\n'
         f'    public static let json: String = {delim}"""\n'
         f'{raw}\n"""{delim}\n\n'
