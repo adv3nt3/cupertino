@@ -1,6 +1,6 @@
 # cupertino setup
 
-Download pre-built search databases from GitHub.
+Download every cupertino database (search.db, samples.db, packages.db) in one go.
 
 ## Synopsis
 
@@ -10,9 +10,11 @@ cupertino setup
 
 ## Description
 
-The `setup` command downloads pre-built search databases from GitHub Releases, providing instant access to Apple documentation and sample code search without crawling or indexing.
+The `setup` command downloads pre-built databases from GitHub Releases, providing instant access to Apple documentation, sample code, and Swift package search without crawling or indexing.
 
 This is the **fastest way to get started** with Cupertino.
+
+`search.db` and `samples.db` ship together from the [`cupertino-docs`](https://github.com/mihaelamj/cupertino-docs) releases. `packages.db` ships separately from the [`cupertino-packages`](https://github.com/mihaelamj/cupertino-packages) releases. If the packages release is missing or unreachable, setup logs a warning and still succeeds; cupertino can serve docs without `packages.db`.
 
 ## What Gets Downloaded
 
@@ -20,6 +22,7 @@ This is the **fastest way to get started** with Cupertino.
 |----------|----------|------|
 | `search.db` | 22,000+ documentation pages, 261 frameworks | ~150-200 MB |
 | `samples.db` | 606 sample projects, 18,000+ source files | ~50-100 MB |
+| `packages.db` | Indexed Swift packages (READMEs, source, examples) | varies |
 
 ## Options
 
@@ -69,9 +72,14 @@ cupertino setup --keep-existing
    [██████████████████████████████] 100% (75.0 MB/75.0 MB)
    ✓ Sample code database (75.0 MB)
 
+⬇️  Downloading Packages database...
+   [██████████████████████████████] 100% (xx.x MB/xx.x MB)
+   ✓ Packages database (xx.x MB)
+
 ✅ Setup complete!
    Documentation: /Users/you/.cupertino/search.db
    Sample code:   /Users/you/.cupertino/samples.db
+   Packages:      /Users/you/.cupertino/packages.db
 
 💡 Start the server with: cupertino serve
 ```

@@ -12,11 +12,11 @@ CLI commands for the Cupertino documentation server.
 | [index](index/) | Index sample code for full-text search |
 | [serve](serve/) | Start MCP server for AI agent access |
 | [ask](ask/) | Ask a natural-language question across all indexed sources |
-| [search](search/) | Search documentation from the command line |
+| [search](search/) | Search documentation from the command line (all sources by default) |
+| [package-search](package-search/) | Hidden: smart query scoped to packages.db only |
 | [read](read/) | Read full document content by URI |
 | [list-frameworks](list-frameworks/) | List available frameworks with document counts |
 | [list-samples](list-samples/) | List indexed Apple sample code projects |
-| [search-samples](search-samples/) | Search Apple sample code projects and files |
 | [read-sample](read-sample/) | Read a sample project's README and metadata |
 | [read-sample-file](read-sample-file/) | Read a source file from a sample project |
 | [resolve-refs](resolve-refs/) | Rewrite unresolved `doc://` markers in saved page rawMarkdown |
@@ -57,7 +57,7 @@ cupertino list-frameworks
 
 # Sample code commands
 cupertino list-samples --limit 10
-cupertino search-samples "SwiftUI" --framework swiftui
+cupertino search "SwiftUI" --source samples --framework swiftui
 cupertino read-sample building-a-document-based-app-with-swiftui
 cupertino read-sample-file building-a-document-based-app-with-swiftui ContentView.swift
 

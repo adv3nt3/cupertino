@@ -10,7 +10,9 @@ cupertino search <query> [options]
 
 ## Description
 
-Searches the local documentation index using full-text search with BM25 ranking. This command provides the same search functionality as the MCP `search_docs` tool, allowing AI agents and users to search from the command line.
+Searches the local indexes using full-text search with BM25 ranking. This command provides the same search functionality as the MCP `search_docs` tool, allowing AI agents and users to search from the command line.
+
+By default, `search` queries **every available source** (Apple docs, sample code, HIG, Apple Archive, Swift Evolution, swift.org, the Swift Book, packages). Use `--source` to narrow to a single source. For a natural-language question with cross-source rank fusion, see [`ask`](../ask/).
 
 Results can be output in text, JSON, or markdown format, making it easy to integrate with scripts and AI workflows.
 
@@ -31,15 +33,16 @@ cupertino search "Observable macro"
 
 ### -s, --source
 
-Filter results by documentation source.
+Filter results to a single documentation source. Omit to search all sources.
 
 **Type:** String
-**Values:** `apple-docs`, `swift-evolution`, `swift-org`, `swift-book`, `packages`, `apple-sample-code`, `apple-archive`, `hig`
+**Values:** `apple-docs`, `samples`, `hig`, `apple-archive`, `swift-evolution`, `swift-org`, `swift-book`, `packages`, `all`
 
 **Example:**
 ```bash
 cupertino search "concurrency" --source swift-evolution
 cupertino search "View" --source apple-docs
+cupertino search "@Observable" --source samples
 cupertino search "CALayer" --source apple-archive
 cupertino search "buttons" --source hig
 ```
@@ -178,6 +181,18 @@ Path to the search database file.
 **Example:**
 ```bash
 cupertino search "View" --search-db ~/custom/search.db
+```
+
+### --sample-db
+
+Path to the sample-code index database. Used when `--source samples` (or the default all-sources mode) needs to query sample-code.
+
+**Type:** String
+**Default:** `~/.cupertino/samples.db`
+
+**Example:**
+```bash
+cupertino search "@Observable" --source samples --sample-db ~/custom/samples.db
 ```
 
 ### --format
