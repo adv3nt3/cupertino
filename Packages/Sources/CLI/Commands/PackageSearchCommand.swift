@@ -31,6 +31,27 @@ struct PackageSearchCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Override packages.db path")
     var db: String?
 
+    @Option(
+        name: .long,
+        help: """
+        Restrict results to packages whose declared deployment target is \
+        compatible with the named platform (#220). Values: iOS, macOS, \
+        tvOS, watchOS, visionOS (case-insensitive). Requires \
+        --min-version. Packages with no annotation source are dropped.
+        """
+    )
+    var platform: String?
+
+    @Option(
+        name: .long,
+        help: """
+        Minimum version for --platform, e.g. 16.0 / 13.0 / 10.15. \
+        Lexicographic compare in SQL — works correctly for current Apple \
+        platform versions (iOS 13+, macOS 11+ etc.). #220
+        """
+    )
+    var minVersion: String?
+
     mutating func run() async throws {
         let dbURL = db.map { URL(fileURLWithPath: $0).expandingTildeInPath }
             ?? Shared.Constants.defaultPackagesDatabase
@@ -52,7 +73,25 @@ struct PackageSearchCommand: AsyncParsableCommand {
         // to calling `PackageQuery.answer` directly — but it goes through the
         // exact same code path as `cupertino ask`, which means future ranking
         // tweaks land in one place.
-        let fetcher = Search.PackageFTSCandidateFetcher(dbPath: dbURL)
+        let availabilityFilter: Search.PackageQuery.AvailabilityFilter?
+        switch (platform, minVersion) {
+        case let (platform?, minVersion?):
+            availabilityFilter = Search.PackageQuery.AvailabilityFilter(
+                platform: platform,
+                minVersion: minVersion
+            )
+        case (.some, nil), (nil, .some):
+            Logging.ConsoleLogger.error(
+                "❌ --platform and --min-version must be used together (#220)."
+            )
+            throw ExitCode.failure
+        case (nil, nil):
+            availabilityFilter = nil
+        }
+        let fetcher = Search.PackageFTSCandidateFetcher(
+            dbPath: dbURL,
+            availability: availabilityFilter
+        )
         let smart = Search.SmartQuery(fetchers: [fetcher])
         let result = await smart.answer(question: trimmed, limit: limit, perFetcherLimit: max(20, limit))
 

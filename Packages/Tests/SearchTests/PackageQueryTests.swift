@@ -1,5 +1,5 @@
-@testable import Search
 import Foundation
+@testable import Search
 import Shared
 import Testing
 
@@ -49,31 +49,31 @@ func intentFallback() {
 
 @Test("config: .howTo weights title heaviest")
 func configHowToWeights() {
-    let c = Search.IntentConfig.for(.howTo)
-    #expect(c.columnWeights.title > c.columnWeights.content)
-    #expect(c.columnWeights.content > c.columnWeights.symbols)
-    #expect(c.kindFilter.contains("doccArticle"))
-    #expect(c.kindFilter.contains("readme"))
+    let cfg = Search.IntentConfig.for(.howTo)
+    #expect(cfg.columnWeights.title > cfg.columnWeights.content)
+    #expect(cfg.columnWeights.content > cfg.columnWeights.symbols)
+    #expect(cfg.kindFilter.contains("doccArticle"))
+    #expect(cfg.kindFilter.contains("readme"))
 }
 
 @Test("config: .symbolLookup weights symbols heaviest")
 func configSymbolLookupWeights() {
-    let c = Search.IntentConfig.for(.symbolLookup)
-    #expect(c.columnWeights.symbols > c.columnWeights.content)
-    #expect(c.columnWeights.symbols > c.columnWeights.title)
-    #expect(c.kindFilter.contains("source"))
+    let cfg = Search.IntentConfig.for(.symbolLookup)
+    #expect(cfg.columnWeights.symbols > cfg.columnWeights.content)
+    #expect(cfg.columnWeights.symbols > cfg.columnWeights.title)
+    #expect(cfg.kindFilter.contains("source"))
 }
 
 @Test("config: .example prioritises example kind")
 func configExampleKindBonus() {
-    let c = Search.IntentConfig.for(.example)
-    #expect(c.kindBonus(for: "example") > c.kindBonus(for: "source"))
+    let cfg = Search.IntentConfig.for(.example)
+    #expect(cfg.kindBonus(for: "example") > cfg.kindBonus(for: "source"))
 }
 
 @Test("config: kind not in order list gets bonus 0")
 func configUnknownKindBonus() {
-    let c = Search.IntentConfig.for(.howTo)
-    #expect(c.kindBonus(for: "irrelevantKind") == 0)
+    let cfg = Search.IntentConfig.for(.howTo)
+    #expect(cfg.kindBonus(for: "irrelevantKind") == 0)
 }
 
 // MARK: - Tokenizer / FTS builder
@@ -103,9 +103,9 @@ func tokensShortDropped() {
 
 @Test("buildFTSQuery: joins tokens with OR and quotes each")
 func buildFTSQueryJoinsOR() {
-    let q = Search.PackageQuery.buildFTSQuery(question: "how do I use swift-log")
-    #expect(q.contains("OR"))
-    #expect(q.contains("\"swift\""))
+    let query = Search.PackageQuery.buildFTSQuery(question: "how do I use swift-log")
+    #expect(query.contains("OR"))
+    #expect(query.contains("\"swift\""))
 }
 
 @Test("buildFTSQuery: empty question → empty string")
@@ -225,4 +225,26 @@ func chunkUnknownExtensionFallback() {
         maxChunkLines: 3
     )
     #expect(chunk.split(separator: "\n").count == 3)
+}
+
+// MARK: - #220 platform filter
+
+@Suite("PackageQuery platform filter (#220)")
+struct PackageQueryPlatformFilterTests {
+    @Test("minColumn maps platform names case-insensitively")
+    func minColumnLookup() {
+        #expect(Search.PackageQuery.minColumn(for: "iOS") == "min_ios")
+        #expect(Search.PackageQuery.minColumn(for: "ios") == "min_ios")
+        #expect(Search.PackageQuery.minColumn(for: "macOS") == "min_macos")
+        #expect(Search.PackageQuery.minColumn(for: "MAC") == "min_macos")
+        #expect(Search.PackageQuery.minColumn(for: "tvOS") == "min_tvos")
+        #expect(Search.PackageQuery.minColumn(for: "watchOS") == "min_watchos")
+        #expect(Search.PackageQuery.minColumn(for: "visionOS") == "min_visionos")
+    }
+
+    @Test("minColumn returns nil for unknown platform — caller skips filter")
+    func minColumnUnknownReturnsNil() {
+        #expect(Search.PackageQuery.minColumn(for: "Linux") == nil)
+        #expect(Search.PackageQuery.minColumn(for: "") == nil)
+    }
 }

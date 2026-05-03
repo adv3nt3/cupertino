@@ -5,6 +5,7 @@ import Search
 import Shared
 
 // MARK: - Ask command (#192 section E5)
+
 //
 // Public-facing smart query: `cupertino ask "<question>"`. Fans the question
 // across every configured source (packages, apple-docs, apple-archive, HIG,
@@ -44,6 +45,26 @@ struct AskCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Skip all apple-docs-backed sources (useful when search.db is absent).")
     var skipDocs: Bool = false
 
+    @Option(
+        name: .long,
+        help: """
+        Restrict packages results to those whose declared deployment \
+        target is compatible with the named platform (#220). Values: \
+        iOS, macOS, tvOS, watchOS, visionOS (case-insensitive). \
+        Requires --min-version. Doc sources are unaffected.
+        """
+    )
+    var platform: String?
+
+    @Option(
+        name: .long,
+        help: """
+        Minimum version for --platform, e.g. 16.0 / 13.0 / 10.15. \
+        Lexicographic compare in SQL; works for current Apple platforms. #220
+        """
+    )
+    var minVersion: String?
+
     mutating func run() async throws {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -81,7 +102,25 @@ struct AskCommand: AsyncParsableCommand {
             let packagesDBURL = packagesDb.map { URL(fileURLWithPath: $0).expandingTildeInPath }
                 ?? Shared.Constants.defaultPackagesDatabase
             if FileManager.default.fileExists(atPath: packagesDBURL.path) {
-                fetchers.append(Search.PackageFTSCandidateFetcher(dbPath: packagesDBURL))
+                let availabilityFilter: Search.PackageQuery.AvailabilityFilter?
+                switch (platform, minVersion) {
+                case let (platform?, minVersion?):
+                    availabilityFilter = Search.PackageQuery.AvailabilityFilter(
+                        platform: platform,
+                        minVersion: minVersion
+                    )
+                case (.some, nil), (nil, .some):
+                    Logging.ConsoleLogger.error(
+                        "❌ --platform and --min-version must be used together (#220)."
+                    )
+                    throw ExitCode.failure
+                case (nil, nil):
+                    availabilityFilter = nil
+                }
+                fetchers.append(Search.PackageFTSCandidateFetcher(
+                    dbPath: packagesDBURL,
+                    availability: availabilityFilter
+                ))
             } else {
                 Logging.ConsoleLogger.info("ℹ️  packages.db not found at \(packagesDBURL.path) — skipping packages.")
             }
@@ -134,13 +173,13 @@ struct AskCommand: AsyncParsableCommand {
         print("Searched: \(result.contributingSources.joined(separator: ", "))")
         print("")
 
-        for (i, fused) in result.candidates.enumerated() {
-            let c = fused.candidate
+        for (idx, fused) in result.candidates.enumerated() {
+            let cand = fused.candidate
             print("══════════════════════════════════════════════════════════════════════")
-            print("[\(i + 1)] \(c.title)  •  source: \(c.source)  •  score: \(String(format: "%.4f", fused.score))")
-            print("    \(c.identifier)")
+            print("[\(idx + 1)] \(cand.title)  •  source: \(cand.source)  •  score: \(String(format: "%.4f", fused.score))")
+            print("    \(cand.identifier)")
             print("──────────────────────────────────────────────────────────────────────")
-            print(c.chunk)
+            print(cand.chunk)
             print("")
         }
     }

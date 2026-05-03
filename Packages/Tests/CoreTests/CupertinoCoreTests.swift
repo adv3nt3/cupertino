@@ -1321,7 +1321,7 @@ struct PackageAvailabilityAnnotatorTests {
         )
 
         let sourceDir = dir.appendingPathComponent("Sources/Foo")
-        try fm.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        try manager.createDirectory(at: sourceDir, withIntermediateDirectories: true)
         let source = """
         struct Foo {
             @available(iOS 17.0, *)

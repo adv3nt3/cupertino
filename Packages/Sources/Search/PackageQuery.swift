@@ -6,10 +6,10 @@ extension Search {
     // MARK: - Public API
 
     public enum QueryIntent: String, Sendable {
-        case howTo           // "how do I ...", "how to ..."
-        case example         // "show me an example of ...", "example of ..."
-        case symbolLookup    // "what is the signature of ...", "what does X do"
-        case crossReference  // "where is X used", "who uses X"
+        case howTo // "how do I ...", "how to ..."
+        case example // "show me an example of ...", "example of ..."
+        case symbolLookup // "what is the signature of ...", "what does X do"
+        case crossReference // "where is X used", "who uses X"
     }
 
     public struct PackageSearchResult: Sendable {
@@ -52,7 +52,27 @@ extension Search {
             }
         }
 
-        public func answer(_ question: String, maxResults: Int = 3) throws -> [PackageSearchResult] {
+        /// Optional platform-availability filter (#220).
+        /// `platform` is one of `iOS`, `macOS`, `tvOS`, `watchOS`, `visionOS`
+        /// (case-insensitive). `minVersion` is a dotted decimal like
+        /// `"16.0"` or `"10.15"`. Both must be set to filter; otherwise the
+        /// flag is ignored. NULL `min_<platform>` rows in `package_metadata`
+        /// are dropped when a filter is active (no annotation = unknown =
+        /// excluded from a platform-specific query).
+        public struct AvailabilityFilter: Sendable {
+            public let platform: String
+            public let minVersion: String
+            public init(platform: String, minVersion: String) {
+                self.platform = platform
+                self.minVersion = minVersion
+            }
+        }
+
+        public func answer(
+            _ question: String,
+            maxResults: Int = 3,
+            availability: AvailabilityFilter? = nil
+        ) throws -> [PackageSearchResult] {
             guard database != nil else { throw PackageQueryError.databaseNotOpen }
 
             let intent = IntentClassifier.classify(question)
@@ -64,38 +84,39 @@ extension Search {
                 ftsQuery: ftsQuery,
                 weights: config.columnWeights,
                 kinds: config.kindFilter,
-                limit: 20
+                limit: 20,
+                availability: availability
             )
 
             let queryTokens = Self.tokens(from: question)
             var scored: [(score: Double, result: PackageSearchResult)] = []
             var seenPaths = Set<String>()
 
-            for c in candidates {
-                let key = "\(c.owner)/\(c.repo)/\(c.relpath)"
+            for cand in candidates {
+                let key = "\(cand.owner)/\(cand.repo)/\(cand.relpath)"
                 if seenPaths.contains(key) { continue }
                 seenPaths.insert(key)
 
                 let chunk = ChunkExtractor.extract(
-                    relpath: c.relpath,
-                    content: c.content,
+                    relpath: cand.relpath,
+                    content: cand.content,
                     queryTokens: queryTokens,
                     maxChunkLines: 60
                 )
                 // lower bm25 = better; invert so bigger is better
-                let baseScore = -c.bm25
-                let bonus = config.kindBonus(for: c.kind)
+                let baseScore = -cand.bm25
+                let bonus = config.kindBonus(for: cand.kind)
                 let finalScore = baseScore + bonus
 
                 scored.append((
                     finalScore,
                     PackageSearchResult(
-                        owner: c.owner,
-                        repo: c.repo,
-                        relpath: c.relpath,
-                        kind: c.kind,
-                        module: c.module,
-                        title: c.title,
+                        owner: cand.owner,
+                        repo: cand.repo,
+                        relpath: cand.relpath,
+                        kind: cand.kind,
+                        module: cand.module,
+                        title: cand.title,
                         score: finalScore,
                         chunk: chunk
                     )
@@ -106,6 +127,20 @@ extension Search {
                 .sorted { $0.score > $1.score }
                 .prefix(maxResults)
                 .map(\.result)
+        }
+
+        /// Map a user-facing platform name (case-insensitive) to the
+        /// `package_metadata.min_<x>` column. Returns nil for unknown
+        /// platforms — caller treats that as "no filter".
+        static func minColumn(for platform: String) -> String? {
+            switch platform.lowercased() {
+            case "ios": return "min_ios"
+            case "macos", "osx", "mac": return "min_macos"
+            case "tvos": return "min_tvos"
+            case "watchos": return "min_watchos"
+            case "visionos": return "min_visionos"
+            default: return nil
+            }
         }
 
         // MARK: - Candidate fetch
@@ -125,17 +160,40 @@ extension Search {
             ftsQuery: String,
             weights: IntentConfig.Weights,
             kinds: Set<String>,
-            limit: Int
+            limit: Int,
+            availability: AvailabilityFilter? = nil
         ) throws -> [Candidate] {
             guard let database else { throw PackageQueryError.databaseNotOpen }
 
             let kindList = kinds.map { "'\($0)'" }.joined(separator: ",")
+
+            // #220: optional platform filter. JOINs package_metadata on
+            // (owner, repo) — both columns are present (UNINDEXED) on
+            // package_files_fts so the join is direct. Filter is
+            // lexicographic on the dotted-decimal min_<platform> column;
+            // works correctly for current Apple platform versions where
+            // majors are uniform-width (iOS 13–26+, macOS 11+, tvOS 13+,
+            // watchOS 6+, visionOS 1+). Old macOS 10.x with multi-digit
+            // minors (e.g. "10.15" vs "10.5") would mis-order via lex
+            // compare; we don't fix that here because no priority package
+            // currently targets macOS < 11. Documented in #220.
+            var availabilityClause = ""
+            if let availability,
+               let column = Self.minColumn(for: availability.platform) {
+                availabilityClause = """
+                  AND m.\(column) IS NOT NULL
+                  AND m.\(column) <= ?
+                """
+            }
+
             let sql = """
-            SELECT owner, repo, module, relpath, kind, title, content,
+            SELECT f.owner, f.repo, f.module, f.relpath, f.kind, f.title, f.content,
                    bm25(package_files_fts, \(weights.title), \(weights.content), \(weights.symbols)) AS score
-            FROM package_files_fts
+            FROM package_files_fts f
+            JOIN package_metadata m ON m.owner = f.owner AND m.repo = f.repo
             WHERE package_files_fts MATCH ?
-              AND kind IN (\(kindList))
+              AND f.kind IN (\(kindList))
+              \(availabilityClause)
             ORDER BY score
             LIMIT \(limit)
             """
@@ -146,6 +204,10 @@ extension Search {
                 throw PackageQueryError.sqliteError(String(cString: sqlite3_errmsg(database)))
             }
             sqlite3_bind_text(statement, 1, ftsQuery, -1, SQLITE_TRANSIENT_QUERY)
+            if let availability,
+               Self.minColumn(for: availability.platform) != nil {
+                sqlite3_bind_text(statement, 2, availability.minVersion, -1, SQLITE_TRANSIENT_QUERY)
+            }
 
             var results: [Candidate] = []
             while sqlite3_step(statement) == SQLITE_ROW {
@@ -176,7 +238,7 @@ extension Search {
         /// - tokenize (alphanumeric + underscore + period runs)
         /// - drop stopwords
         /// - OR the remaining tokens with prefix matching where useful
-        internal static func buildFTSQuery(question: String) -> String {
+        static func buildFTSQuery(question: String) -> String {
             let tokens = Self.tokens(from: question)
             guard !tokens.isEmpty else { return "" }
             // AND the meaningful tokens. FTS5 MATCH supports implicit AND via spaces
@@ -184,7 +246,7 @@ extension Search {
             return tokens.map { "\"\($0)\"" }.joined(separator: " OR ")
         }
 
-        internal static func tokens(from question: String) -> [String] {
+        static func tokens(from question: String) -> [String] {
             let stopwords: Set<String> = [
                 "how", "to", "do", "i", "can", "you", "please", "show", "me", "give",
                 "a", "an", "the", "is", "are", "of", "for", "in", "on", "with", "and",
@@ -211,22 +273,19 @@ extension Search {
 
     // MARK: - Intent classifier
 
-    internal enum IntentClassifier {
+    enum IntentClassifier {
         static func classify(_ question: String) -> QueryIntent {
             let lower = question.lowercased()
             if lower.contains("where is") || lower.contains("who uses") || lower.contains("who calls")
-                || lower.contains("usage of")
-            {
+                || lower.contains("usage of") {
                 return .crossReference
             }
             if lower.contains("signature") || lower.contains("declaration")
-                || lower.hasPrefix("what does") || lower.hasPrefix("what is the ")
-            {
+                || lower.hasPrefix("what does") || lower.hasPrefix("what is the ") {
                 return .symbolLookup
             }
             if lower.contains("example") || lower.hasPrefix("show me") || lower.hasPrefix("give me")
-                || lower.contains("sample")
-            {
+                || lower.contains("sample") {
                 return .example
             }
             return .howTo
@@ -235,7 +294,7 @@ extension Search {
 
     // MARK: - Per-intent config
 
-    internal struct IntentConfig {
+    struct IntentConfig {
         struct Weights {
             let title: Double
             let content: Double
@@ -244,7 +303,7 @@ extension Search {
 
         let columnWeights: Weights
         let kindFilter: Set<String>
-        let kindOrder: [String]  // best → worst for bonus
+        let kindOrder: [String] // best → worst for bonus
 
         func kindBonus(for kind: String) -> Double {
             guard let idx = kindOrder.firstIndex(of: kind) else { return 0 }
@@ -284,7 +343,7 @@ extension Search {
 
     // MARK: - Chunk extractor
 
-    internal enum ChunkExtractor {
+    enum ChunkExtractor {
         /// Return the most relevant chunk of a file given query tokens.
         /// - markdown: the `## `-delimited section containing the first token
         ///   match (or the file-leading preamble if no match).
@@ -311,9 +370,9 @@ extension Search {
         static func markdownChunk(content: String, queryTokens: [String], maxLines: Int) -> String {
             let lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
             // Build section ranges: indices of lines starting with "## "
-            var sectionStarts: [Int] = [0]
-            for (i, line) in lines.enumerated() {
-                if line.hasPrefix("## ") { sectionStarts.append(i) }
+            var sectionStarts = [0]
+            for (idx, line) in lines.enumerated() {
+                if line.hasPrefix("## ") { sectionStarts.append(idx) }
             }
             sectionStarts.append(lines.count)
 
@@ -322,8 +381,8 @@ extension Search {
             for sectionIdx in 0..<(sectionStarts.count - 1) {
                 let start = sectionStarts[sectionIdx]
                 let end = sectionStarts[sectionIdx + 1]
-                for i in start..<end {
-                    let lineLower = lines[i].lowercased()
+                for idx in start..<end {
+                    let lineLower = lines[idx].lowercased()
                     if lowerTokens.contains(where: { lineLower.contains($0) }) {
                         let take = Swift.min(end - start, maxLines)
                         return lines[start..<(start + take)].joined(separator: "\n")
@@ -341,10 +400,10 @@ extension Search {
 
             // Find first line with a token match.
             var matchLine: Int?
-            for (i, line) in lines.enumerated() {
-                let l = line.lowercased()
-                if lowerTokens.contains(where: { l.contains($0) }) {
-                    matchLine = i
+            for (idx, line) in lines.enumerated() {
+                let lowered = line.lowercased()
+                if lowerTokens.contains(where: { lowered.contains($0) }) {
+                    matchLine = idx
                     break
                 }
             }
@@ -363,8 +422,7 @@ extension Search {
                     || trimmed.hasPrefix("private ")
                     || trimmed.hasPrefix("internal ")
                     || trimmed.hasPrefix("open ")
-                    || trimmed.hasPrefix("fileprivate ")
-                {
+                    || trimmed.hasPrefix("fileprivate ") {
                     declLine = start
                     break
                 }
@@ -389,15 +447,16 @@ extension Search {
 
         public var errorDescription: String? {
             switch self {
-            case .openFailed(let m): return "Could not open packages.db: \(m)"
+            case .openFailed(let msg): return "Could not open packages.db: \(msg)"
             case .databaseNotOpen: return "packages.db connection closed"
-            case .sqliteError(let m): return "SQLite error: \(m)"
+            case .sqliteError(let msg): return "SQLite error: \(msg)"
             }
         }
     }
 }
 
-// Separate name to avoid collision with the same constant in PackageIndex.swift
-// (both files define a private SQLITE_TRANSIENT but Swift is fine with per-file
-// private naming collisions).
+/// Separate name to avoid collision with the same constant in PackageIndex.swift
+/// (both files define a private SQLITE_TRANSIENT but Swift is fine with per-file
+/// private naming collisions).
+// swiftlint:disable:next identifier_name
 private let SQLITE_TRANSIENT_QUERY = unsafeBitCast(-1, to: sqlite3_destructor_type.self)

@@ -2,6 +2,7 @@ import Foundation
 import Shared
 
 // MARK: - Smart-query abstraction (#192 section E)
+
 //
 // A `CandidateFetcher` turns a natural-language question into a ranked list
 // of `SmartCandidate` results pulled from one data source (packages.db, the
@@ -16,7 +17,6 @@ import Shared
 // to add for new sources (WWDC transcripts #58, Swift Forums #89, etc.).
 
 extension Search {
-
     /// A single candidate surfaced by a `CandidateFetcher`. Scores are
     /// source-local and not comparable across fetchers — `SmartQuery` does the
     /// cross-source ranking via rank fusion.
@@ -85,16 +85,25 @@ extension Search {
         public let sourceName = Shared.Constants.SourcePrefix.packages
 
         private let dbPath: URL
+        private let availability: Search.PackageQuery.AvailabilityFilter?
 
-        public init(dbPath: URL = Shared.Constants.defaultPackagesDatabase) {
+        public init(
+            dbPath: URL = Shared.Constants.defaultPackagesDatabase,
+            availability: Search.PackageQuery.AvailabilityFilter? = nil
+        ) {
             self.dbPath = dbPath
+            self.availability = availability
         }
 
         public func fetch(question: String, limit: Int) async throws -> [SmartCandidate] {
             let query = try await Search.PackageQuery(dbPath: dbPath)
             defer { Task { await query.disconnect() } }
 
-            let results = try await query.answer(question, maxResults: limit)
+            let results = try await query.answer(
+                question,
+                maxResults: limit,
+                availability: availability
+            )
             return results.map { row in
                 SmartCandidate(
                     source: sourceName,
@@ -142,7 +151,7 @@ extension Search {
             includeArchive: Bool = false
         ) {
             self.searchIndex = searchIndex
-            self.sourceName = source
+            sourceName = source
             self.includeArchive = includeArchive
         }
 

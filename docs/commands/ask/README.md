@@ -5,7 +5,7 @@ Ask a natural-language question across all indexed sources
 ## Synopsis
 
 ```bash
-cupertino ask "<question>" [--limit <n>] [--per-source <n>] [--search-db <path>] [--packages-db <path>] [--skip-packages] [--skip-docs]
+cupertino ask "<question>" [--limit <n>] [--per-source <n>] [--search-db <path>] [--packages-db <path>] [--skip-packages] [--skip-docs] [--platform <name>] [--min-version <ver>]
 ```
 
 ## Description
@@ -43,6 +43,8 @@ A failing fetcher (e.g. missing DB) collapses to empty rather than failing the w
 | `--packages-db` | Override `packages.db` path. Defaults to the configured packages database. |
 | `--skip-packages` | Skip the packages source (useful when `packages.db` is absent or stale). |
 | `--skip-docs` | Skip all apple-docs-backed sources (useful when `search.db` is absent). |
+| `--platform` | Restrict packages results to those whose declared deployment target is compatible with the named platform (`iOS` / `macOS` / `tvOS` / `watchOS` / `visionOS`, case-insensitive). Doc sources are unaffected. Requires `--min-version`. ([#220](https://github.com/mihaelamj/cupertino/issues/220)) |
+| `--min-version` | Minimum version for `--platform`, e.g. `16.0` / `13.0` / `10.15`. |
 
 ## Examples
 
