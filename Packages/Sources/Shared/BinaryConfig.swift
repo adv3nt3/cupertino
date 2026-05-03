@@ -22,12 +22,13 @@ extension Shared {
         /// Process-wide cached config, loaded once relative to the running executable.
         public static let shared: BinaryConfig = load(from: executableDirectory)
 
-        /// Directory of the running executable (symlinks resolved), or nil if it
-        /// can't be determined (e.g. some test runner contexts).
+        /// Directory of the running executable, **without** resolving symlinks,
+        /// so a config dropped next to a stable symlink (e.g.
+        /// `~/.local/bin/cupertino-dev` → `.build/release/cupertino`) survives
+        /// rebuilds that recreate the symlink target. Returns nil if the path
+        /// can't be determined (some test runner contexts).
         public static var executableDirectory: URL? {
-            Bundle.main.executableURL?
-                .resolvingSymlinksInPath()
-                .deletingLastPathComponent()
+            Bundle.main.executableURL?.deletingLastPathComponent()
         }
 
         /// Loads `cupertino.config.json` from the given directory. Returns an
