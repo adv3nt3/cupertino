@@ -2,6 +2,10 @@
 
 _Post-1.0 fixes accumulating on the `develop` branch, off `packages-overhaul`. Will roll into a future patch release after 1.0.0 ships. Out of scope for the 1.0.0 cut so the release theme stays clean._
 
+### Added
+
+- **`fetch --type packages --annotate-availability`** ([#219](https://github.com/mihaelamj/cupertino/issues/219)): new opt-in stage 3 of the merged packages fetch. Walks every `<owner>/<repo>/` subdir under `~/.cupertino/packages/` and writes a per-package `availability.json` capturing the `Package.swift` `platforms: [...]` deployment-target block plus every `@available(...)` attribute occurrence in `Sources/` and `Tests/` (file path + line + parsed platform list). Pure on-disk pass — no network. Idempotent. Runs whether or not stage 2 just downloaded fresh archives, so you can re-annotate an existing corpus by combining `--skip-metadata --skip-archives --annotate-availability`. Smoke run on the May 2026 priority closure: 183 packages annotated, 13.5k `@available` attrs in 12s. Regex-based scanner — multi-line attrs aren't handled and hits aren't tied to specific declarations; the AST upgrade (extending `ASTIndexer.SwiftSourceExtractor`) is a follow-up.
+
 ### Fixed
 
 - **Dev binary now writes to `~/.cupertino-dev/` automatically** ([#218](https://github.com/mihaelamj/cupertino/issues/218)): `make build-debug` and `make build-release` now drop a `cupertino.config.json` next to the produced binary with `{ "baseDirectory": "~/.cupertino-dev" }`. Previously a locally-built dev binary silently fell through to brew's `~/.cupertino/`, clobbering the installed user's data mid-flight (hit on the 2026-05-03 packages-overhaul rebuild). Brew bottles still ship only the binary — released installs continue to resolve to the standard `~/.cupertino/`. Override at invocation: `make build-debug DEV_BASE_DIR=~/some-other-dir`.

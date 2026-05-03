@@ -6,13 +6,16 @@ Fetch Swift Package Documentation: metadata catalog (Swift Package Index + GitHu
 
 ```bash
 cupertino fetch --type packages
-cupertino fetch --type packages --skip-archives    # metadata only
-cupertino fetch --type packages --skip-metadata    # archives only
+cupertino fetch --type packages --skip-archives                     # metadata only
+cupertino fetch --type packages --skip-metadata                     # archives only
+cupertino fetch --type packages --annotate-availability             # all three stages
+cupertino fetch --type packages --skip-metadata --skip-archives \
+                                --annotate-availability             # annotation pass over an existing on-disk corpus
 ```
 
 ## Description
 
-Runs two stages back to back. Either can be skipped via `--skip-metadata` / `--skip-archives` (#217 merged the previous separate `--type package-docs` into stage 2 of `--type packages`).
+Runs up to three stages. Stages 1 and 2 run by default; stage 3 is opt-in. Any stage can be skipped via the corresponding flag (#217 merged the previous separate `--type package-docs` into stage 2; #219 added stage 3).
 
 ### Stage 1 — Metadata refresh
 
@@ -21,6 +24,15 @@ Pulls the full Swift Package Index listing and decorates each entry with GitHub 
 ### Stage 2 — Priority archive download
 
 Reads the priority-packages list (`PriorityPackagesCatalog`), resolves the transitive dependency closure of each seed via `Package.swift` (and `Package.resolved` as fallback for apps), then downloads + extracts a tarball per package via `PackageArchiveExtractor`. The extractor pulls `https://codeload.github.com/<owner>/<repo>/tar.gz/<ref>` (HEAD → main → master fallback) and keeps a filtered subset: `README*`, `CHANGELOG*`, `LICENSE*`, `Package.swift`, all of `Sources/` + `Tests/`, every `.docc` article and tutorial, plus `Examples/` / `Demo/` directories. Each package gets a `manifest.json`. Closure walking can be turned off with the hidden `--no-recurse` flag.
+
+### Stage 3 — Availability annotation ([#219](https://github.com/mihaelamj/cupertino/issues/219), opt-in via `--annotate-availability`)
+
+Walks every `<owner>/<repo>/` subdir on disk and writes a per-package `availability.json` next to `manifest.json`. Captures:
+
+- `Package.swift` `platforms: [...]` deployment-target block (mapped to `{iOS: 13.0, macOS: 10.15, …}`).
+- Every `@available(...)` attribute occurrence in `.swift` files under `Sources/` and `Tests/`, with file path, line number, and parsed platform list.
+
+Pure on-disk pass — no network. Idempotent. Regex-based; multi-line attrs aren't handled and hits aren't associated with specific declarations (AST upgrade is a follow-up). Runs whether or not stages 1 and 2 just executed, so you can re-annotate an existing corpus with `--skip-metadata --skip-archives --annotate-availability`.
 
 ## Data Sources
 
@@ -51,11 +63,12 @@ Reads the priority-packages list (`PriorityPackagesCatalog`), resolves the trans
 |--------|-------------|
 | `--skip-metadata` | Skip stage 1 and run only the archive download |
 | `--skip-archives` | Skip stage 2 and run only the metadata refresh |
+| `--annotate-availability` | Run stage 3 (availability annotation) after the chosen stages — opt-in (#219) |
 | `--limit <N>` | (stage 1) cap the number of packages fetched from SPI |
 | `--start-clean` | (stage 1) discard any saved metadata-fetch checkpoint |
 | `--output-dir <path>` | override the output directory |
 
-Passing both `--skip-metadata` and `--skip-archives` is an error.
+Passing both `--skip-metadata` and `--skip-archives` without `--annotate-availability` is an error (nothing to do).
 
 ## Examples
 

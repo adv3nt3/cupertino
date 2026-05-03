@@ -158,6 +158,18 @@ struct FetchCommand: AsyncParsableCommand {
     )
     var skipArchives: Bool = false
 
+    @Flag(
+        name: .long,
+        help: """
+        After `--type packages` stage 2, walk the on-disk corpus and \
+        write a per-package `availability.json` recording \
+        `Package.swift` deployment targets and every `@available(...)` \
+        attribute occurrence in `Sources/` and `Tests/` (#219). Pure \
+        on-disk pass — no network. Idempotent.
+        """
+    )
+    var annotateAvailability: Bool = false
+
     mutating func run() async throws {
         logStartMessage()
 
@@ -730,9 +742,9 @@ struct FetchCommand: AsyncParsableCommand {
 
         try FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
 
-        if skipMetadata, skipArchives {
+        if skipMetadata, skipArchives, !annotateAvailability {
             Logging.ConsoleLogger.error(
-                "❌ Both --skip-metadata and --skip-archives passed — nothing to do."
+                "❌ Both --skip-metadata and --skip-archives passed without --annotate-availability — nothing to do."
             )
             throw ExitCode.failure
         }
@@ -755,6 +767,66 @@ struct FetchCommand: AsyncParsableCommand {
         } else {
             Logging.ConsoleLogger.info("⏭  --skip-archives: skipping GitHub archive download")
         }
+
+        if annotateAvailability {
+            try await runPackageAnnotationStage(outputURL: outputURL)
+        }
+    }
+
+    /// Stage 3 (#219): walk every `<owner>/<repo>/` subdir under `outputURL`
+    /// and write `availability.json` capturing `Package.swift` deployment
+    /// targets and every `@available(...)` attribute occurrence in the
+    /// `Sources/` and `Tests/` trees. Pure on-disk pass — runs whether or
+    /// not stage 2 just downloaded fresh archives. Idempotent.
+    private func runPackageAnnotationStage(outputURL: URL) async throws {
+        Logging.ConsoleLogger.info("🏷  Stage 3 — Annotating availability metadata (#219)")
+
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: outputURL.path) else {
+            Logging.ConsoleLogger.error(
+                "❌ Packages directory \(outputURL.path) doesn't exist — run with stage 2 first."
+            )
+            throw ExitCode.failure
+        }
+
+        let owners = (try? fm.contentsOfDirectory(at: outputURL, includingPropertiesForKeys: nil))?
+            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            .filter { !$0.lastPathComponent.hasPrefix(".") }
+            ?? []
+
+        let annotator = Core.PackageAvailabilityAnnotator()
+        var packagesAnnotated = 0
+        var totalAttrs = 0
+        let startedAt = Date()
+
+        for ownerURL in owners.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            let repos = (try? fm.contentsOfDirectory(at: ownerURL, includingPropertiesForKeys: nil))?
+                .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+                .filter { !$0.lastPathComponent.hasPrefix(".") }
+                ?? []
+
+            for repoURL in repos.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+                let label = "\(ownerURL.lastPathComponent)/\(repoURL.lastPathComponent)"
+                do {
+                    let result = try await annotator.annotate(packageDirectory: repoURL)
+                    packagesAnnotated += 1
+                    totalAttrs += result.stats.totalAttributes
+                    Logging.ConsoleLogger.info(
+                        "  ✅ \(label) — \(result.stats.totalAttributes) @available attrs across "
+                            + "\(result.stats.filesWithAvailability)/\(result.stats.filesScanned) files"
+                    )
+                } catch {
+                    Logging.ConsoleLogger.error("  ✗ \(label) — \(error.localizedDescription)")
+                }
+            }
+        }
+
+        let duration = Int(Date().timeIntervalSince(startedAt))
+        Logging.ConsoleLogger.output("")
+        Logging.ConsoleLogger.info("✅ Annotation completed")
+        Logging.ConsoleLogger.info("   Packages annotated: \(packagesAnnotated)")
+        Logging.ConsoleLogger.info("   Total @available attrs: \(totalAttrs)")
+        Logging.ConsoleLogger.info("   Duration: \(duration)s")
     }
 
     private func runPackageMetadataStage(outputURL: URL) async throws {

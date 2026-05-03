@@ -1159,4 +1159,183 @@ struct PriorityPackagesMergeTests {
     }
 }
 
+// MARK: - PackageAvailabilityAnnotator tests (#219)
+
+@Suite("PackageAvailabilityAnnotator (#219)")
+struct PackageAvailabilityAnnotatorTests {
+    @Test("parsePlatforms extracts iOS / macOS / tvOS / watchOS deployment targets")
+    func platformsCommonShape() {
+        let manifest = """
+        // swift-tools-version:5.9
+        import PackageDescription
+        let package = Package(
+            name: "Foo",
+            platforms: [
+                .macOS(.v10_15),
+                .iOS(.v13),
+                .tvOS(.v13),
+                .watchOS(.v6)
+            ],
+            products: []
+        )
+        """
+        let result = Core.PackageAvailabilityAnnotator.parsePlatforms(from: manifest)
+        #expect(result["macOS"] == "10.15")
+        #expect(result["iOS"] == "13.0")
+        #expect(result["tvOS"] == "13.0")
+        #expect(result["watchOS"] == "6.0")
+    }
+
+    @Test("parsePlatforms returns empty dict when no platforms block")
+    func platformsAbsent() {
+        let manifest = """
+        import PackageDescription
+        let package = Package(name: "Foo", products: [])
+        """
+        #expect(Core.PackageAvailabilityAnnotator.parsePlatforms(from: manifest).isEmpty)
+    }
+
+    @Test("parsePlatforms handles multi-digit minor like .v10_15_4")
+    func platformsMultiDigit() {
+        let manifest = """
+        platforms: [.macOS(.v10_15_4)],
+        """
+        let result = Core.PackageAvailabilityAnnotator.parsePlatforms(from: manifest)
+        #expect(result["macOS"] == "10.15.4")
+    }
+
+    @Test("parsePlatforms ignores nested arrays elsewhere in the manifest")
+    func platformsIgnoresOtherArrays() {
+        let manifest = """
+        platforms: [.iOS(.v16)],
+        targets: [.target(name: "Foo")]
+        """
+        let result = Core.PackageAvailabilityAnnotator.parsePlatforms(from: manifest)
+        #expect(result == ["iOS": "16.0"])
+    }
+
+    @Test("extractAvailability captures line + raw + platforms list")
+    func availabilityBasic() {
+        let source = """
+        struct Foo {
+            @available(iOS 16.0, macOS 13.0, *)
+            func bar() {}
+        }
+        """
+        let attrs = Core.PackageAvailabilityAnnotator.extractAvailability(from: source)
+        #expect(attrs.count == 1)
+        #expect(attrs.first?.line == 2)
+        #expect(attrs.first?.raw == "(iOS 16.0, macOS 13.0, *)")
+        #expect(attrs.first?.platforms.contains("iOS") == true)
+        #expect(attrs.first?.platforms.contains("macOS") == true)
+        #expect(attrs.first?.platforms.contains("*") == true)
+    }
+
+    @Test("extractAvailability handles deprecated/noasync keyword forms")
+    func availabilityKeywords() {
+        let source = """
+        @available(*, deprecated, message: "Use newFoo() instead")
+        func oldFoo() {}
+
+        @available(*, noasync, message: "Sync only")
+        func syncFoo() {}
+        """
+        let attrs = Core.PackageAvailabilityAnnotator.extractAvailability(from: source)
+        #expect(attrs.count == 2)
+        #expect(attrs[0].platforms.contains("deprecated"))
+        #expect(attrs[1].platforms.contains("noasync"))
+    }
+
+    @Test("extractAvailability returns empty array on plain source")
+    func availabilityEmpty() {
+        #expect(Core.PackageAvailabilityAnnotator.extractAvailability(from: "let x = 1").isEmpty)
+    }
+
+    @Test("annotate writes availability.json with deployment targets + file attrs")
+    func annotateRoundtrip() async throws {
+        let dir = try Self.makeTempPackage()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let annotator = Core.PackageAvailabilityAnnotator()
+        let result = try await annotator.annotate(packageDirectory: dir)
+
+        #expect(result.deploymentTargets["iOS"] == "16.0")
+        #expect(result.deploymentTargets["macOS"] == "13.0")
+        #expect(result.stats.totalAttributes == 1)
+        #expect(result.fileAvailability.count == 1)
+        #expect(result.fileAvailability.first?.relpath == "Sources/Foo/Foo.swift")
+
+        let outURL = dir.appendingPathComponent(Core.PackageAvailabilityAnnotator.outputFilename)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let reloaded = try decoder.decode(
+            Core.PackageAvailabilityAnnotator.AnnotationResult.self,
+            from: Data(contentsOf: outURL)
+        )
+        #expect(reloaded.deploymentTargets == result.deploymentTargets)
+        #expect(reloaded.stats.totalAttributes == 1)
+    }
+
+    @Test("annotate throws when package directory missing")
+    func annotateMissingDir() async throws {
+        let bogus = URL(fileURLWithPath: "/tmp/nope-\(UUID().uuidString)")
+        let annotator = Core.PackageAvailabilityAnnotator()
+        await #expect(throws: Core.PackageAvailabilityAnnotator.AnnotationError.self) {
+            _ = try await annotator.annotate(packageDirectory: bogus)
+        }
+    }
+
+    @Test("annotate is idempotent — second pass produces same content")
+    func annotateIdempotent() async throws {
+        let dir = try Self.makeTempPackage()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let annotator = Core.PackageAvailabilityAnnotator()
+        let first = try await annotator.annotate(packageDirectory: dir)
+        let second = try await annotator.annotate(packageDirectory: dir)
+        // Stats and content stable; only annotatedAt differs.
+        #expect(first.deploymentTargets == second.deploymentTargets)
+        #expect(first.fileAvailability == second.fileAvailability)
+        #expect(first.stats == second.stats)
+    }
+
+    private static func makeTempPackage() throws -> URL {
+        let manager = FileManager.default
+        let dir = manager.temporaryDirectory
+            .appendingPathComponent("AvailAnnotateTests-\(UUID().uuidString)", isDirectory: true)
+        try manager.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let manifest = """
+        // swift-tools-version:5.9
+        import PackageDescription
+        let package = Package(
+            name: "Foo",
+            platforms: [.iOS(.v16), .macOS(.v13)],
+            products: []
+        )
+        """
+        try manifest.write(
+            to: dir.appendingPathComponent("Package.swift"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let sourceDir = dir.appendingPathComponent("Sources/Foo")
+        try fm.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        let source = """
+        struct Foo {
+            @available(iOS 17.0, *)
+            func bar() {}
+        }
+        """
+        try source.write(
+            to: sourceDir.appendingPathComponent("Foo.swift"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        return dir
+    }
+}
+
 // Note: Test tags are now defined in TestSupport/TestTags.swift

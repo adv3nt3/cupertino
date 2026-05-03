@@ -54,6 +54,7 @@ The `fetch` command is the unified fetching command that handles both web crawli
 - [--limit](limit.md) - Maximum number of items to fetch (packages/code types only)
 - `--skip-metadata` - Skip the metadata-refresh stage of `--type packages` ([#217](https://github.com/mihaelamj/cupertino/issues/217))
 - `--skip-archives` - Skip the archive-download stage of `--type packages` ([#217](https://github.com/mihaelamj/cupertino/issues/217))
+- `--annotate-availability` - Opt-in stage 3: walk the on-disk packages corpus and write per-package `availability.json` (deployment targets + `@available` attrs) ([#219](https://github.com/mihaelamj/cupertino/issues/219))
 - `--fast` - Use higher concurrency and shorter timeouts for `--type availability` (faster but more aggressive)
 
 ## Examples
