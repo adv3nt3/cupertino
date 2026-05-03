@@ -1,8 +1,6 @@
 import Foundation
-import Testing
-
-@testable import CLI
 @testable import Shared
+import Testing
 
 // MARK: - Progress Output Capture
 
@@ -40,7 +38,6 @@ final class ProgressOutputCapture: @unchecked Sendable {
 
 @Suite("Setup Progress Format Tests")
 struct SetupProgressFormatTests {
-
     @Test("Progress bar renders correct width")
     func progressBarWidth() {
         let barWidth = 30
@@ -86,8 +83,8 @@ struct SetupProgressFormatTests {
         #expect(spinner.count == 10)
 
         // Test cycling
-        for i in 0..<20 {
-            let char = spinner[i % spinner.count]
+        for idx in 0..<20 {
+            let char = spinner[idx % spinner.count]
             #expect(spinner.contains(char))
         }
 
@@ -119,7 +116,7 @@ struct SetupProgressFormatTests {
         let clearToEndOfLine = "\u{1B}[K"
 
         #expect(clearToEndOfLine.count == 3)
-        #expect(clearToEndOfLine.first?.asciiValue == 0x1B)
+        #expect(clearToEndOfLine.first?.asciiValue == 0x1b)
         #expect(clearToEndOfLine.contains("[K"))
     }
 
@@ -140,10 +137,9 @@ struct SetupProgressFormatTests {
 
 @Suite("Download Delegate Tests")
 struct DownloadDelegateTests {
-
     @Test("Progress calculation with known size")
     func progressCalculation() {
-        let totalBytesWritten: Int64 = 50 * 1024 * 1024  // 50 MB
+        let totalBytesWritten: Int64 = 50 * 1024 * 1024 // 50 MB
         let totalBytesExpected: Int64 = 200 * 1024 * 1024 // 200 MB
 
         let progress = Double(totalBytesWritten) / Double(totalBytesExpected)
@@ -168,10 +164,10 @@ struct DownloadDelegateTests {
         // Test various progress percentages
         let testCases: [(Double, Int)] = [
             (0.0, 0),
-            (0.25, 7),   // 30 * 0.25 = 7.5 -> 7
-            (0.5, 15),   // 30 * 0.5 = 15
-            (0.75, 22),  // 30 * 0.75 = 22.5 -> 22
-            (1.0, 30),   // 30 * 1.0 = 30
+            (0.25, 7), // 30 * 0.25 = 7.5 -> 7
+            (0.5, 15), // 30 * 0.5 = 15
+            (0.75, 22), // 30 * 0.75 = 22.5 -> 22
+            (1.0, 30), // 30 * 1.0 = 30
         ]
 
         for (progress, expectedFilled) in testCases {
@@ -185,7 +181,6 @@ struct DownloadDelegateTests {
 
 @Suite("Setup Download Integration Tests")
 struct SetupDownloadIntegrationTests {
-
     /// Test directory for downloads
     private static func testDirectory() -> URL {
         FileManager.default.temporaryDirectory
@@ -206,7 +201,7 @@ struct SetupDownloadIntegrationTests {
 
         // Use a larger file to ensure progress callbacks fire
         // Swift main README is larger than swift-evolution README
-        let testURL = URL(string: "https://raw.githubusercontent.com/apple/swift/main/README.md")!
+        let testURL = try #require(URL(string: "https://raw.githubusercontent.com/apple/swift/main/README.md"))
         let destinationURL = testDir.appendingPathComponent("test-download.md")
 
         // Track progress updates
@@ -253,7 +248,7 @@ struct SetupDownloadIntegrationTests {
         try FileManager.default.createDirectory(at: testDir, withIntermediateDirectories: true)
 
         // Use slightly larger file to get more progress updates
-        let testURL = URL(string: "https://raw.githubusercontent.com/apple/swift/main/README.md")!
+        let testURL = try #require(URL(string: "https://raw.githubusercontent.com/apple/swift/main/README.md"))
 
         let progressCapture = ProgressOutputCapture()
 

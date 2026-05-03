@@ -1,63 +1,93 @@
+@testable import Distribution
 import Foundation
+@testable import Shared
 import Testing
 
-@testable import CLI
-@testable import Shared
+// MARK: - Status classification (#168, lifted to Distribution in #246)
 
-// MARK: - Version tracking (#168)
-
-@Suite("SetupCommand.SetupStatus classification")
-struct SetupStatusTests {
-
-    @Test("Missing DBs classify as .missing regardless of version stamp")
-    func missingDBs() {
-        let status = SetupCommand.setupStatus(
+@Suite("Distribution.InstalledVersion.classify")
+struct InstalledVersionStatusTests {
+    @Test("Missing search.db classifies as .missing")
+    func missingSearch() {
+        let status = Distribution.InstalledVersion.classify(
             searchDBExists: false,
             samplesDBExists: true,
+            packagesDBExists: true,
             installedVersion: "0.9.0",
             currentVersion: "0.9.0"
         )
         #expect(status == .missing)
     }
 
-    @Test("Both DBs missing also classifies as .missing")
-    func bothDBsMissing() {
-        let status = SetupCommand.setupStatus(
+    @Test("Missing samples.db classifies as .missing")
+    func missingSamples() {
+        let status = Distribution.InstalledVersion.classify(
+            searchDBExists: true,
+            samplesDBExists: false,
+            packagesDBExists: true,
+            installedVersion: "0.9.0",
+            currentVersion: "0.9.0"
+        )
+        #expect(status == .missing)
+    }
+
+    @Test("Missing packages.db classifies as .missing (#246 fix)")
+    func missingPackages() {
+        // Pre-#246 the status enum ignored packages.db; cupertino setup
+        // would report .current even when packages.db hadn't been
+        // downloaded yet. Now any missing DB → .missing.
+        let status = Distribution.InstalledVersion.classify(
+            searchDBExists: true,
+            samplesDBExists: true,
+            packagesDBExists: false,
+            installedVersion: "0.9.0",
+            currentVersion: "0.9.0"
+        )
+        #expect(status == .missing)
+    }
+
+    @Test("All DBs missing also classifies as .missing")
+    func allMissing() {
+        let status = Distribution.InstalledVersion.classify(
             searchDBExists: false,
             samplesDBExists: false,
+            packagesDBExists: false,
             installedVersion: nil,
             currentVersion: "0.9.0"
         )
         #expect(status == .missing)
     }
 
-    @Test("DBs present + nil version file = .unknown (legacy install)")
+    @Test("All DBs present + nil version file = .unknown (legacy install)")
     func unknownLegacyInstall() {
-        let status = SetupCommand.setupStatus(
+        let status = Distribution.InstalledVersion.classify(
             searchDBExists: true,
             samplesDBExists: true,
+            packagesDBExists: true,
             installedVersion: nil,
             currentVersion: "0.9.0"
         )
         #expect(status == .unknown(current: "0.9.0"))
     }
 
-    @Test("DBs present + matching version = .current")
+    @Test("All DBs present + matching version = .current")
     func currentDBs() {
-        let status = SetupCommand.setupStatus(
+        let status = Distribution.InstalledVersion.classify(
             searchDBExists: true,
             samplesDBExists: true,
+            packagesDBExists: true,
             installedVersion: "0.9.0",
             currentVersion: "0.9.0"
         )
         #expect(status == .current(version: "0.9.0"))
     }
 
-    @Test("DBs present + different version = .stale")
+    @Test("All DBs present + different version = .stale")
     func staleDBs() {
-        let status = SetupCommand.setupStatus(
+        let status = Distribution.InstalledVersion.classify(
             searchDBExists: true,
             samplesDBExists: true,
+            packagesDBExists: true,
             installedVersion: "0.8.0",
             currentVersion: "0.9.0"
         )
@@ -67,9 +97,8 @@ struct SetupStatusTests {
 
 // MARK: - Version file read/write
 
-@Suite("SetupCommand version file helpers")
-struct SetupVersionFileTests {
-
+@Suite("Distribution.InstalledVersion file helpers")
+struct InstalledVersionFileTests {
     private static func tempBaseDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("cupertino-setup-version-\(UUID().uuidString)")
@@ -81,15 +110,15 @@ struct SetupVersionFileTests {
     func readMissingReturnsNil() throws {
         let dir = try Self.tempBaseDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        #expect(SetupCommand.readInstalledVersion(in: dir) == nil)
+        #expect(Distribution.InstalledVersion.read(in: dir) == nil)
     }
 
     @Test("Write then read round-trips the version string")
     func writeThenRead() throws {
         let dir = try Self.tempBaseDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        try SetupCommand.writeInstalledVersion("0.9.0", in: dir)
-        #expect(SetupCommand.readInstalledVersion(in: dir) == "0.9.0")
+        try Distribution.InstalledVersion.write("0.9.0", in: dir)
+        #expect(Distribution.InstalledVersion.read(in: dir) == "0.9.0")
     }
 
     @Test("Read trims surrounding whitespace and newlines")
@@ -98,7 +127,7 @@ struct SetupVersionFileTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent(Shared.Constants.FileName.setupVersionFile)
         try "  0.9.0  \n".write(to: url, atomically: true, encoding: .utf8)
-        #expect(SetupCommand.readInstalledVersion(in: dir) == "0.9.0")
+        #expect(Distribution.InstalledVersion.read(in: dir) == "0.9.0")
     }
 
     @Test("Read returns nil for an empty/whitespace-only file")
@@ -107,15 +136,15 @@ struct SetupVersionFileTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent(Shared.Constants.FileName.setupVersionFile)
         try "   \n\n".write(to: url, atomically: true, encoding: .utf8)
-        #expect(SetupCommand.readInstalledVersion(in: dir) == nil)
+        #expect(Distribution.InstalledVersion.read(in: dir) == nil)
     }
 
     @Test("Write overwrites the existing version")
     func writeOverwrites() throws {
         let dir = try Self.tempBaseDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        try SetupCommand.writeInstalledVersion("0.8.0", in: dir)
-        try SetupCommand.writeInstalledVersion("0.9.0", in: dir)
-        #expect(SetupCommand.readInstalledVersion(in: dir) == "0.9.0")
+        try Distribution.InstalledVersion.write("0.8.0", in: dir)
+        try Distribution.InstalledVersion.write("0.9.0", in: dir)
+        #expect(Distribution.InstalledVersion.read(in: dir) == "0.9.0")
     }
 }

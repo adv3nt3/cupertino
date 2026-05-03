@@ -23,6 +23,7 @@ let macOSOnlyProducts: [Product] = [
     .singleTargetLibrary("Search"),
     .singleTargetLibrary("SampleIndex"),
     .singleTargetLibrary("Services"),
+    .singleTargetLibrary("Distribution"),
     .singleTargetLibrary("Resources"),
     .singleTargetLibrary("Availability"),
     .singleTargetLibrary("ASTIndexer"),
@@ -214,6 +215,16 @@ let targets: [Target] = {
         dependencies: ["ASTIndexer", "Search", "SampleIndex", "TestSupport"]
     )
 
+    // ---------- Distribution (#246: SetupCommand lift) ----------
+    let distributionTarget = Target.target(
+        name: "Distribution",
+        dependencies: ["Shared", "Logging"]
+    )
+    let distributionTestsTarget = Target.testTarget(
+        name: "DistributionTests",
+        dependencies: ["Distribution", "Shared", "TestSupport"]
+    )
+
     let cliTarget = Target.executableTarget(
         name: "CLI",
         dependencies: [
@@ -223,6 +234,7 @@ let targets: [Target] = {
             "Search",
             "SampleIndex",
             "Services",
+            "Distribution",
             "Logging",
             "RemoteSync",
             "Availability",
@@ -298,12 +310,6 @@ let targets: [Target] = {
         path: "Tests/CLICommandTests/SaveTests"
     )
 
-    let setupTestsTarget = Target.testTarget(
-        name: "SetupTests",
-        dependencies: ["CLI", "Shared", "TestSupport"],
-        path: "Tests/CLICommandTests/SetupTests"
-    )
-
     let tuiTestsTarget = Target.testTarget(
         name: "TUITests",
         dependencies: ["TUI", "Core", "Shared", "TestSupport"],
@@ -339,6 +345,8 @@ let targets: [Target] = {
         sampleIndexTestsTarget,
         servicesTarget,
         servicesTestsTarget,
+        distributionTarget,
+        distributionTestsTarget,
         mcpSupportTarget,
         mcpSupportTestsTarget,
         searchToolProviderTarget,
@@ -362,7 +370,6 @@ let targets: [Target] = {
         doctorTestsTarget,
         fetchTestsTarget,
         saveTestsTarget,
-        setupTestsTarget,
         // CLI Tests
         cliTestsTarget,
         // MockAIAgent Tests
