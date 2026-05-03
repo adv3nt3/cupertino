@@ -5,7 +5,7 @@ Ask a natural-language question across all indexed sources
 ## Synopsis
 
 ```bash
-cupertino ask "<question>" [--limit <n>] [--per-source <n>] [--search-db <path>] [--packages-db <path>] [--skip-packages] [--skip-docs] [--platform <name>] [--min-version <ver>]
+cupertino ask "<question>" [--limit <n>] [--per-source <n>] [--search-db <path>] [--packages-db <path>] [--samples-db <path>] [--skip-packages] [--skip-samples] [--skip-docs] [--platform <name>] [--min-version <ver>]
 ```
 
 ## Description
@@ -29,6 +29,7 @@ By default `ask` fans out across:
 - `swift-org` — swift.org documentation
 - `swift-book` — _The Swift Programming Language_ book
 - `packages` — Indexed Swift packages (when `packages.db` is present)
+- `samples` — Apple sample-code projects (when `samples.db` is present, [#230](https://github.com/mihaelamj/cupertino/issues/230))
 
 A failing fetcher (e.g. missing DB) collapses to empty rather than failing the whole query, so partial coverage still returns useful results.
 
@@ -41,7 +42,9 @@ A failing fetcher (e.g. missing DB) collapses to empty rather than failing the w
 | `--per-source` | Per-source candidate cap before rank fusion. Default `10`. |
 | `--search-db` | Override `search.db` path. Defaults to the configured docs database. |
 | `--packages-db` | Override `packages.db` path. Defaults to the configured packages database. |
+| `--samples-db` | Override `samples.db` path. Defaults to the configured samples database. ([#230](https://github.com/mihaelamj/cupertino/issues/230)) |
 | `--skip-packages` | Skip the packages source (useful when `packages.db` is absent or stale). |
+| `--skip-samples` | Skip the samples source (useful when `samples.db` is absent or stale). ([#230](https://github.com/mihaelamj/cupertino/issues/230)) |
 | `--skip-docs` | Skip all apple-docs-backed sources (useful when `search.db` is absent). |
 | `--platform` | Restrict packages results to those whose declared deployment target is compatible with the named platform (`iOS` / `macOS` / `tvOS` / `watchOS` / `visionOS`, case-insensitive). Doc sources are unaffected. Requires `--min-version`. ([#220](https://github.com/mihaelamj/cupertino/issues/220)) |
 | `--min-version` | Minimum version for `--platform`, e.g. `16.0` / `13.0` / `10.15`. |

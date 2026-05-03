@@ -141,3 +141,38 @@ struct FormatConfigTests {
         #expect(config.emptyMessage == "_No results found. Try broader search terms._")
     }
 }
+
+// MARK: - SampleCandidateFetcher (#230)
+
+@Suite("SampleCandidateFetcher (#230)")
+struct SampleCandidateFetcherTests {
+    @Test("sourceName matches the canonical samples prefix")
+    func sourceNameIsSamples() async throws {
+        // Build a fetcher against a temp DB just to verify the protocol
+        // hookup; the in-memory DB is empty so fetch() returns no rows
+        // but doesn't throw.
+        let tempDB = FileManager.default.temporaryDirectory
+            .appendingPathComponent("samples-fetcher-test-\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(at: tempDB) }
+
+        let service = try await Services.SampleSearchService(dbPath: tempDB)
+        defer { Task { await service.disconnect() } }
+
+        let fetcher = Services.SampleCandidateFetcher(service: service)
+        #expect(fetcher.sourceName == Shared.Constants.SourcePrefix.samples)
+    }
+
+    @Test("Empty samples DB → fetch returns empty array, doesn't throw")
+    func emptyDBYieldsEmptyResults() async throws {
+        let tempDB = FileManager.default.temporaryDirectory
+            .appendingPathComponent("samples-fetcher-test-\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(at: tempDB) }
+
+        let service = try await Services.SampleSearchService(dbPath: tempDB)
+        defer { Task { await service.disconnect() } }
+
+        let fetcher = Services.SampleCandidateFetcher(service: service)
+        let candidates = try await fetcher.fetch(question: "swiftui list", limit: 5)
+        #expect(candidates.isEmpty)
+    }
+}

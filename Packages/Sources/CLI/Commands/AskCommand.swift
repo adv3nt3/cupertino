@@ -1,7 +1,9 @@
 import ArgumentParser
 import Foundation
 import Logging
+import SampleIndex
 import Search
+import Services
 import Shared
 
 // MARK: - Ask command (#192 section E5)
@@ -39,8 +41,14 @@ struct AskCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Override packages.db path.")
     var packagesDb: String?
 
+    @Option(name: .long, help: "Override samples.db path.")
+    var samplesDb: String?
+
     @Flag(name: .long, help: "Skip the packages source (useful when packages.db is absent or stale).")
     var skipPackages: Bool = false
+
+    @Flag(name: .long, help: "Skip the samples source (useful when samples.db is absent or stale).")
+    var skipSamples: Bool = false
 
     @Flag(name: .long, help: "Skip all apple-docs-backed sources (useful when search.db is absent).")
     var skipDocs: Bool = false
@@ -130,6 +138,30 @@ struct AskCommand: AsyncParsableCommand {
             }
         }
 
+        // #230: samples source. Mirrors the packages branch — skip when
+        // the DB file is missing rather than failing the whole query.
+        // Lifecycle: SampleSearchService owns its DB connection and is
+        // never disconnected explicitly here. The actor's deinit closes
+        // SQLite via SampleIndex.Database.deinit.
+        var sampleService: Services.SampleSearchService?
+        if !skipSamples {
+            let samplesDBURL = samplesDb.map { URL(fileURLWithPath: $0).expandingTildeInPath }
+                ?? SampleIndex.defaultDatabasePath
+            if FileManager.default.fileExists(atPath: samplesDBURL.path) {
+                do {
+                    let service = try await Services.SampleSearchService(dbPath: samplesDBURL)
+                    sampleService = service
+                    fetchers.append(Services.SampleCandidateFetcher(service: service))
+                } catch {
+                    Logging.ConsoleLogger.error(
+                        "⚠️  Could not open samples.db: \(error.localizedDescription)"
+                    )
+                }
+            } else {
+                Logging.ConsoleLogger.info("ℹ️  samples.db not found at \(samplesDBURL.path) — skipping samples.")
+            }
+        }
+
         guard !fetchers.isEmpty else {
             Logging.ConsoleLogger.error("❌ No data sources available. Run `cupertino setup` to populate them.")
             throw ExitCode.failure
@@ -144,6 +176,9 @@ struct AskCommand: AsyncParsableCommand {
 
         if let index = searchIndex {
             await index.disconnect()
+        }
+        if let sampleService {
+            await sampleService.disconnect()
         }
 
         Self.printReport(
