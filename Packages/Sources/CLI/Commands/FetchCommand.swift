@@ -746,9 +746,12 @@ struct FetchCommand: AsyncParsableCommand {
         let priorityPackages = await PriorityPackagesCatalog.allPackages
 
         guard !priorityPackages.isEmpty else {
+            let priorityPackagesPath = Shared.Constants.defaultPackagesDirectory
+                .appendingPathComponent(Shared.Constants.FileName.priorityPackages)
+                .path
             Logging.ConsoleLogger.error("❌ Error: No priority packages found")
             Logging.ConsoleLogger.error("   Searched:")
-            Logging.ConsoleLogger.error("   - ~/.cupertino/packages/priority-packages.json")
+            Logging.ConsoleLogger.error("   - \(priorityPackagesPath)")
             Logging.ConsoleLogger.error("   - Shared.Constants.CriticalApplePackages")
             Logging.ConsoleLogger.error("   - Shared.Constants.KnownEcosystemPackages")
             Logging.ConsoleLogger.error("\n   Please ensure at least one package source is configured.")

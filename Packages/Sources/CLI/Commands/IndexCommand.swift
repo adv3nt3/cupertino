@@ -14,7 +14,7 @@ struct IndexCommand: AsyncParsableCommand {
         abstract: "Index sample code for search",
         discussion: """
         Indexes Apple sample code projects for full-text search.
-        Creates a separate database (~/.cupertino/samples.db) optimized for code search.
+        Creates a separate database (\(SampleIndex.defaultDatabasePath.path)) optimized for code search.
 
         IMPORTANT: Run 'cupertino cleanup' before indexing to remove unnecessary files
         from sample code archives. This significantly reduces index size and improves
@@ -34,13 +34,13 @@ struct IndexCommand: AsyncParsableCommand {
 
     @Option(
         name: .long,
-        help: "Sample code directory (default: ~/.cupertino/sample-code)"
+        help: "Sample code directory (default: \(SampleIndex.defaultSampleCodeDirectory.path))"
     )
     var sampleCodeDir: String?
 
     @Option(
         name: .long,
-        help: "Database path (default: ~/.cupertino/samples.db)"
+        help: "Database path (default: \(SampleIndex.defaultDatabasePath.path))"
     )
     var database: String?
 

@@ -157,7 +157,7 @@ extension Search {
                     "Database schema version \(currentVersion) requires migration to version 5. " +
                         "This is a breaking change that adds the 'language' field. " +
                         "Please delete the database and run 'cupertino save' to rebuild: " +
-                        "rm ~/.cupertino/search.db && cupertino save"
+                        "rm \(dbPath.path) && cupertino save"
                 )
             }
 
@@ -196,7 +196,7 @@ extension Search {
                     "Database schema version \(currentVersion) requires migration to version 12. " +
                         "This is a breaking change that adds AST-derived symbols to the FTS index. " +
                         "Please delete the database and run 'cupertino save' to rebuild: " +
-                        "rm ~/.cupertino/search.db && cupertino save"
+                        "rm \(dbPath.path) && cupertino save"
                 )
             }
         }
