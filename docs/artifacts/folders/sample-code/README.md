@@ -130,9 +130,9 @@ Requires:
 
 After fetching, index the samples for full-text search:
 ```bash
-cupertino index
+cupertino save --samples
 # or force reindex:
-cupertino index --force
+cupertino save --samples --force
 ```
 
 This creates `samples.db` with 18,000+ indexed source files.

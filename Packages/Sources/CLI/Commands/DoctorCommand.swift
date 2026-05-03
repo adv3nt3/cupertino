@@ -65,7 +65,7 @@ struct DoctorCommand: AsyncParsableCommand {
         // Check packages.db (#192 F1)
         allChecks = checkPackagesDatabase() && allChecks
 
-        // Check samples.db (sample code index built by `cupertino index`)
+        // Check samples.db (sample code index built by `cupertino save --samples`)
         checkSamplesDatabase()
 
         // Check search database + schema version (#192 F2)
@@ -237,7 +237,7 @@ struct DoctorCommand: AsyncParsableCommand {
     }
 
     /// Report `samples.db` presence, size, and row counts (sample projects +
-    /// indexed source files). Built by `cupertino index` after sample-code
+    /// indexed source files). Built by `cupertino save --samples` after sample-code
     /// download + cleanup. Missing is a warning (server runs without it; the
     /// sample-code search just isn't available).
     private func checkSamplesDatabase() {
@@ -247,7 +247,7 @@ struct DoctorCommand: AsyncParsableCommand {
 
         guard FileManager.default.fileExists(atPath: samplesDBURL.path) else {
             Log.output("   ⚠  Database: \(samplesDBURL.path) (not found)")
-            Log.output("     → Run: cupertino fetch --type samples && cupertino cleanup && cupertino index")
+            Log.output("     → Run: cupertino fetch --type samples && cupertino cleanup && cupertino save --samples")
             Log.output("")
             return
         }

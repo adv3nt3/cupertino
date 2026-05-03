@@ -1,7 +1,9 @@
 import ArgumentParser
+import Core
 import Foundation
 import Logging
 import RemoteSync
+import SampleIndex
 import Search
 import Shared
 
@@ -44,22 +46,115 @@ struct SaveCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Stream documentation from GitHub (instant setup, no local files needed)")
     var remote: Bool = false
 
-    @Flag(name: .long, help: .hidden)
+    @Flag(
+        name: .long,
+        help: """
+        Build search.db (Apple docs + Swift Evolution + HIG + Archive + \
+        Swift.org + Swift Book). Defaults to ON when no scope flag is \
+        passed. (#231)
+        """
+    )
+    var docs: Bool = false
+
+    @Flag(
+        name: .long,
+        help: """
+        Build packages.db from extracted package archives at \
+        `~/.cupertino/packages/<owner>/<repo>/`. (#231)
+        """
+    )
     var packages: Bool = false
 
-    mutating func run() async throws {
-        // Hidden: save --packages indexes the downloaded package trees into packages.db.
-        if packages {
-            try await runPackagesIndexer()
-            return
-        }
+    @Flag(
+        name: .long,
+        help: """
+        Build samples.db from extracted sample-code zips at \
+        `~/.cupertino/sample-code/`. Replaces the removed `cupertino \
+        index` command. (#231)
+        """
+    )
+    var samples: Bool = false
 
-        // Handle remote mode separately
+    @Option(
+        name: .long,
+        help: "Sample-code directory for `--samples` (#231)."
+    )
+    var samplesDir: String?
+
+    @Option(
+        name: .long,
+        help: "samples.db path override for `--samples` (#231)."
+    )
+    var samplesDB: String?
+
+    @Flag(
+        name: .long,
+        help: "Force re-index of every sample under `--samples` (existing rows wiped)."
+    )
+    var force: Bool = false
+
+    mutating func run() async throws {
+        // Handle remote mode separately — it's an entirely different
+        // pipeline (streams docs from GitHub) and shouldn't combine with
+        // the build-locally scope flags.
         if remote {
             try await runRemote()
             return
         }
 
+        // #231: scope flags. None set → build all three in order
+        // (docs → packages → samples). Any combination of the three
+        // builds only the requested subset, in the same fixed order.
+        let scopeFlagsSet = docs || packages || samples
+        let buildDocs = !scopeFlagsSet || docs
+        let buildPackages = !scopeFlagsSet || packages
+        let buildSamples = !scopeFlagsSet || samples
+
+        if buildDocs {
+            try await runDocsIndexer()
+        }
+        if buildPackages {
+            try await runPackagesIndexerSafely()
+        }
+        if buildSamples {
+            try await runSamplesIndexerSafely()
+        }
+    }
+
+    /// Build packages.db; skip with an info log if the source dir is
+    /// missing rather than failing the whole `save` invocation. Single-
+    /// scope `--packages` callers still see the missing-dir as a hard
+    /// error via `runPackagesIndexer` directly.
+    private func runPackagesIndexerSafely() async throws {
+        let packagesDir = Shared.Constants.defaultPackagesDirectory
+        guard FileManager.default.fileExists(atPath: packagesDir.path) else {
+            Logging.ConsoleLogger.info(
+                "ℹ️  packages directory not found at \(packagesDir.path) — skipping packages step. "
+                    + "Run `cupertino fetch --type packages` first."
+            )
+            return
+        }
+        try await runPackagesIndexer()
+    }
+
+    /// Build samples.db; skip with an info log if the source dir is
+    /// missing rather than failing the whole `save` invocation.
+    private func runSamplesIndexerSafely() async throws {
+        let samplesDirURL = samplesDir.map { URL(fileURLWithPath: $0).expandingTildeInPath }
+            ?? SampleIndex.defaultSampleCodeDirectory
+        guard FileManager.default.fileExists(atPath: samplesDirURL.path) else {
+            Logging.ConsoleLogger.info(
+                "ℹ️  sample-code directory not found at \(samplesDirURL.path) — skipping samples step. "
+                    + "Run `cupertino fetch --type samples` first."
+            )
+            return
+        }
+        try await runSamplesIndexer()
+    }
+
+    /// Body of the legacy `save` (docs-only) path. Renamed so the
+    /// scope-flag dispatcher can call it explicitly. #231
+    private mutating func runDocsIndexer() async throws {
         Logging.ConsoleLogger.info("🔨 Building Search Index\n")
 
         // Determine effective base directory
@@ -191,7 +286,136 @@ struct SaveCommand: AsyncParsableCommand {
         return formatter.string(fromByteCount: size)
     }
 
-    // MARK: - Packages Mode (hidden)
+    // MARK: - Samples mode (#231: replaces `cupertino index`)
+
+    /// Build samples.db from extracted sample-code zips. Body lifted from
+    /// the deleted `IndexCommand.swift`. Same defaults: source dir
+    /// `~/.cupertino/sample-code/`, DB at `samples.db` next to base.
+    /// `--samples-dir` and `--samples-db` override.
+    private func runSamplesIndexer() async throws {
+        Log.output("📦 Cupertino - Sample Code Indexer")
+        Log.output("")
+
+        let sampleCodeURL = samplesDir.map { URL(fileURLWithPath: $0).expandingTildeInPath }
+            ?? SampleIndex.defaultSampleCodeDirectory
+
+        let databaseURL = samplesDB.map { URL(fileURLWithPath: $0).expandingTildeInPath }
+            ?? SampleIndex.defaultDatabasePath
+
+        guard FileManager.default.fileExists(atPath: sampleCodeURL.path) else {
+            Log.error("Sample code directory not found: \(sampleCodeURL.path)")
+            Log.error("Run 'cupertino fetch --type samples' first to download sample code.")
+            throw ExitCode.failure
+        }
+
+        Log.output("   Sample code: \(sampleCodeURL.path)")
+        Log.output("   Database: \(databaseURL.path)")
+        Log.output("")
+
+        // Drop the existing DB for a clean re-index. Matches the
+        // search.db / packages.db pattern — FTS5 doesn't tolerate
+        // duplicate-row inserts cleanly, so a wipe + rebuild is the
+        // simplest correctness story.
+        if FileManager.default.fileExists(atPath: databaseURL.path) {
+            Log.output("🗑️  Removing existing database for fresh index...")
+            try FileManager.default.removeItem(at: databaseURL)
+        }
+
+        let database = try await SampleIndex.Database(dbPath: databaseURL)
+
+        if clear {
+            Log.output("🗑️  Clearing existing index...")
+            try await database.clearAll()
+        }
+
+        let existingProjects = try await database.projectCount()
+        let existingFiles = try await database.fileCount()
+        if existingProjects > 0, !force, !clear {
+            Log.output("ℹ️  Found existing index with \(existingProjects) projects, \(existingFiles) files")
+            Log.output("   Use --force to reindex all, or --clear to start fresh")
+            Log.output("")
+        }
+
+        Log.output("📖 Loading sample code catalog...")
+        let catalogEntries = await SampleCodeCatalog.allEntries
+        Log.output("   Found \(catalogEntries.count) entries in catalog")
+
+        let entries = catalogEntries.map { entry in
+            SampleIndex.SampleCodeEntryInfo(
+                title: entry.title,
+                description: entry.description,
+                frameworks: [entry.framework],
+                webURL: entry.webURL,
+                zipFilename: entry.zipFilename
+            )
+        }
+
+        Log.output("")
+        Log.output("📇 Indexing sample code...")
+        Log.output("")
+
+        let builder = SampleIndex.Builder(
+            database: database,
+            sampleCodeDirectory: sampleCodeURL
+        )
+
+        let startTime = Date()
+
+        final class ProgressTracker: @unchecked Sendable {
+            var lastPercent = 0.0
+        }
+        let tracker = ProgressTracker()
+
+        let indexed = try await builder.indexAll(
+            entries: entries,
+            forceReindex: force
+        ) { progress in
+            let percent = progress.percentComplete
+            if percent - tracker.lastPercent >= 5.0 || progress.projectIndex == progress.totalProjects {
+                let statusIcon: String
+                switch progress.status {
+                case .extracting: statusIcon = "📦"
+                case .indexingFiles: statusIcon = "📝"
+                case .completed: statusIcon = "✅"
+                case .failed: statusIcon = "❌"
+                }
+                Log.output("   [\(String(format: "%3.0f%%", percent))] \(statusIcon) \(progress.currentProject)")
+                tracker.lastPercent = percent
+            }
+        }
+
+        let duration = Date().timeIntervalSince(startTime)
+
+        let finalProjects = try await database.projectCount()
+        let finalFiles = try await database.fileCount()
+        let finalSymbols = try await database.symbolCount()
+        let finalImports = try await database.importCount()
+
+        Log.output("")
+        Log.output("✅ Indexing complete!")
+        Log.output("")
+        Log.output("   Projects indexed: \(indexed)")
+        Log.output("   Total projects: \(finalProjects)")
+        Log.output("   Total files: \(finalFiles)")
+        Log.output("   Symbols extracted: \(finalSymbols)")
+        Log.output("   Imports captured: \(finalImports)")
+        Log.output("   Duration: \(Int(duration))s")
+        Log.output("   Database: \(formatSamplesFileSize(databaseURL))")
+    }
+
+    private func formatSamplesFileSize(_ url: URL) -> String {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? Int64
+        else {
+            return "unknown"
+        }
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: size)
+    }
+
+    // MARK: - Packages Mode
 
     private func runPackagesIndexer() async throws {
         let effectiveBase = baseDir.map { URL(fileURLWithPath: $0).expandingTildeInPath }

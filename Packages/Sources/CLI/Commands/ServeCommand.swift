@@ -27,7 +27,7 @@ struct ServeCommand: AsyncParsableCommand {
         • list_frameworks - List available frameworks with document counts
         • read_document - Read full document content by URI
 
-        Sample Code Tools (requires 'cupertino index'):
+        Sample Code Tools (requires 'cupertino save --samples'):
         • search_samples - Search sample code projects and files
         • list_samples - List all indexed sample projects
         • read_sample - Read sample project README
@@ -140,8 +140,7 @@ struct ServeCommand: AsyncParsableCommand {
         }
 
         do {
-            let sampleIndex = try await SampleIndex.Database(dbPath: sampleDBURL)
-            return sampleIndex
+            return try await SampleIndex.Database(dbPath: sampleDBURL)
         } catch {
             let errorMsg = "⚠️  Failed to load sample index: \(error)"
             let cmd = "\(Shared.Constants.App.commandName) index"
@@ -161,8 +160,7 @@ struct ServeCommand: AsyncParsableCommand {
         }
 
         do {
-            let searchIndex = try await Search.Index(dbPath: searchDBURL)
-            return searchIndex
+            return try await Search.Index(dbPath: searchDBURL)
         } catch {
             let errorMsg = "⚠️  Failed to load search index: \(error)"
             let cmd = "\(Shared.Constants.App.commandName) save"

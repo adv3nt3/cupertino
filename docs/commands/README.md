@@ -102,12 +102,12 @@ cupertino search "your query"  # For CLI usage
 ```bash
 # Option 1: From GitHub (recommended - faster, no auth)
 cupertino fetch --type samples
-cupertino index
+cupertino save --samples
 
 # Option 2: From Apple (slower, requires Apple ID)
 cupertino fetch --type code
 cupertino cleanup
-cupertino index
+cupertino save --samples
 ```
 
 ### Search and Read

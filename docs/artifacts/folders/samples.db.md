@@ -9,7 +9,7 @@ SQLite database with Full-Text Search (FTS5) index for fast sample code searches
 ## Created By
 
 ```bash
-cupertino index
+cupertino save --samples
 ```
 
 **Important**: Run `cupertino cleanup` before indexing to remove unnecessary files from sample code archives.
@@ -140,20 +140,20 @@ The MCP server provides sample code search tools:
 
 ```bash
 # Clear and rebuild from scratch
-cupertino index --clear
+cupertino save --samples --clear
 
 # Force reindex all projects (even if already indexed)
-cupertino index --force
+cupertino save --samples --force
 ```
 
 ## Customizing Location
 
 ```bash
 # Use custom database path
-cupertino index --database ./my-samples.db
+cupertino save --samples --samples-db ./my-samples.db
 
 # Use custom sample code directory
-cupertino index --sample-code-dir ~/my-samples
+cupertino save --samples --samples-dir ~/my-samples
 ```
 
 ## Technical Details

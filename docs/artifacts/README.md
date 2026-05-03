@@ -82,7 +82,7 @@ All Cupertino artifacts are stored under:
 | `cupertino fetch --type packages` | Package data + checkpoint | `~/.cupertino/packages/` |
 | `cupertino fetch --type availability` | Updates JSON with availability | `~/.cupertino/docs/*.json` |
 | `cupertino save` | Documentation search database | `~/.cupertino/search.db` |
-| `cupertino index` | Sample code search database | `~/.cupertino/samples.db` |
+| `cupertino save --samples` | Sample code search database | `~/.cupertino/samples.db` |
 
 ## Customizing Locations
 

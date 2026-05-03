@@ -2,6 +2,10 @@
 
 _Post-1.0 fixes accumulating on the `develop` branch, off `packages-overhaul`. Will roll into a future patch release after 1.0.0 ships. Out of scope for the 1.0.0 cut so the release theme stays clean._
 
+### Changed
+
+- **`cupertino save` now builds all three databases by default; `cupertino index` removed** ([#231](https://github.com/mihaelamj/cupertino/issues/231)): scope flags `--docs` / `--packages` / `--samples` select a subset; with no scope flag passed `save` builds search.db, packages.db, and samples.db in that order, skipping any source directory that's missing with an info log. The standalone `cupertino index` command is gone — its body lives under `save --samples` (with `--samples-dir`, `--samples-db`, `--force` options renamed for symmetry). Pre-1.0 clean break, no alias. Subcommand count drops 16 → 15.
+
 ### Added
 
 - **`cupertino ask` now includes the samples corpus** ([#230](https://github.com/mihaelamj/cupertino/issues/230)): new `Services.SampleCandidateFetcher` adapts `SampleSearchService` to the `Search.CandidateFetcher` protocol so `Search.SmartQuery`'s reciprocal-rank fusion fans out across `apple-docs`, `apple-archive`, `hig`, `swift-evolution`, `swift-org`, `swift-book`, **packages**, and **samples** in one call. New `--skip-samples` flag and `--samples-db <path>` override mirror the existing `--skip-packages` / `--packages-db` shape. Default behaviour: samples included whenever `samples.db` exists. Smoke run: `ask "swiftui list animation" --skip-docs` returns sample matches with FTS5-extracted snippets alongside package hits.

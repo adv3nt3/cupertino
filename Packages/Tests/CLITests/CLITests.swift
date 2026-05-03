@@ -15,14 +15,14 @@ struct CommandRegistrationTests {
     func subcommandsRegistered() {
         let config = Cupertino.configuration
 
-        // 15 visible + 1 hidden (package-search). `setup` now owns every
+        // 14 visible + 1 hidden (package-search). `setup` now owns every
         // database — packages-setup was collapsed into it. `resolve-refs`
-        // post-processes saved pages against #208.
-        #expect(config.subcommands.count == 16)
+        // post-processes saved pages against #208. `index` removed in
+        // #231 (samples now build via `save --samples`).
+        #expect(config.subcommands.count == 15)
         #expect(config.subcommands.contains { $0 == SetupCommand.self })
         #expect(config.subcommands.contains { $0 == FetchCommand.self })
         #expect(config.subcommands.contains { $0 == SaveCommand.self })
-        #expect(config.subcommands.contains { $0 == IndexCommand.self })
         #expect(config.subcommands.contains { $0 == ServeCommand.self })
         #expect(config.subcommands.contains { $0 == SearchCommand.self })
         #expect(config.subcommands.contains { $0 == ReadCommand.self })

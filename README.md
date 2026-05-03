@@ -103,7 +103,7 @@ cupertino fetch --type all           # All types in parallel
 # Build indexes
 cupertino save                       # Build documentation search index (from local files)
 cupertino save --remote              # Build from GitHub (no local files needed)
-cupertino index                      # Index sample code for search
+cupertino save --samples                      # Index sample code for search
 
 # Start server
 cupertino                            # Start MCP server (default command)
@@ -497,7 +497,7 @@ These catalogs are indexed during `cupertino save` and enable instant search wit
       - Parameters: `uri` (required), `format` (optional: `json` or `markdown`, default: `json`)
       - JSON format returns the full structured document data (recommended for AI)
       - Markdown format returns rendered content for human reading
-  - **Sample Code Tools** (requires `cupertino index`):
+  - **Sample Code Tools** (requires `cupertino save --samples`):
     - `search_samples` - Search sample code projects and files
     - `list_samples` - List all indexed sample projects
     - `read_sample` - Read sample project README and metadata
@@ -523,7 +523,7 @@ These catalogs are indexed during `cupertino save` and enable instant search wit
 | `cupertino search` | Search documentation from CLI |
 | `cupertino read` | Read full document by URI |
 | `cupertino doctor` | Check server health |
-| `cupertino index` | Index sample code for search |
+| `cupertino save --samples` | Index sample code for search |
 | `cupertino cleanup` | Clean up sample code archives |
 
 See [docs/commands/](docs/commands/) for detailed usage and options.
