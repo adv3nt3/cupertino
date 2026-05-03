@@ -110,7 +110,7 @@ let targets: [Target] = {
 
     let coreTarget = Target.target(
         name: "Core",
-        dependencies: ["Shared", "Logging", "Resources"]
+        dependencies: ["Shared", "Logging", "Resources", "ASTIndexer"]
     )
     let coreTestsTarget = Target.testTarget(
         name: "CoreTests",
