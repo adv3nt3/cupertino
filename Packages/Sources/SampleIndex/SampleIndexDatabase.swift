@@ -1,5 +1,6 @@
 import ASTIndexer
 import Foundation
+import Shared
 import SQLite3
 
 // MARK: - Sample Index Database
@@ -577,12 +578,12 @@ extension SampleIndex {
                 throw SampleIndex.Error.invalidQuery("Query cannot be empty")
             }
 
-            // Sanitize query for FTS5
-            let sanitizedQuery = query
-                .components(separatedBy: .whitespaces)
-                .filter { !$0.isEmpty }
-                .map { "\"\($0)\"" }
-                .joined(separator: " ")
+            // Build FTS5 query: tokenize natural language, drop
+            // stopwords, OR-join the remainder. Same shape as
+            // Search.PackageQuery uses for packages.db (#238 unified
+            // both paths via Shared.FTSQuery).
+            let sanitizedQuery = Shared.FTSQuery.build(question: query)
+            guard !sanitizedQuery.isEmpty else { return [] }
 
             var sql = """
             SELECT p.id, p.title, p.description, p.frameworks, p.readme,
@@ -680,12 +681,12 @@ extension SampleIndex {
                 throw SampleIndex.Error.invalidQuery("Query cannot be empty")
             }
 
-            // Sanitize for FTS5
-            let sanitizedQuery = query
-                .components(separatedBy: .whitespaces)
-                .filter { !$0.isEmpty }
-                .map { "\"\($0)\"" }
-                .joined(separator: " ")
+            // Build FTS5 query: tokenize natural language, drop
+            // stopwords, OR-join the remainder. Same shape as
+            // Search.PackageQuery uses for packages.db (#238 unified
+            // both paths via Shared.FTSQuery).
+            let sanitizedQuery = Shared.FTSQuery.build(question: query)
+            guard !sanitizedQuery.isEmpty else { return [] }
 
             // #233: optional platform filter — JOIN projects table when
             // both `platform` and `minVersion` are set, restrict to rows

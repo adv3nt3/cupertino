@@ -97,3 +97,47 @@ struct SchemaVersionTests {
         #expect(earlier < later)
     }
 }
+
+// MARK: - Shared.FTSQuery (#238)
+
+@Suite("Shared.FTSQuery (#238)")
+struct FTSQueryTests {
+    @Test("Stopwords removed, remaining tokens OR-joined")
+    func stopwordsAndOR() {
+        let query = Shared.FTSQuery.build(question: "how do I animate a swiftui list")
+        // After stopword strip: animate, swiftui, list
+        #expect(query.contains("\"animate\""))
+        #expect(query.contains("\"swiftui\""))
+        #expect(query.contains("\"list\""))
+        #expect(query.contains(" OR "))
+        // Stopwords gone
+        #expect(!query.contains("\"how\""))
+        #expect(!query.contains("\"do\""))
+        #expect(!query.contains("\"i\""))
+        #expect(!query.contains("\"a\""))
+    }
+
+    @Test("Empty / stopword-only question yields empty FTS string")
+    func emptyAndOnlyStopwords() {
+        #expect(Shared.FTSQuery.build(question: "") == "")
+        #expect(Shared.FTSQuery.build(question: "   ") == "")
+        #expect(Shared.FTSQuery.build(question: "how do I a the") == "")
+    }
+
+    @Test("Dotted identifiers survive tokenization")
+    func dottedIdentifiers() {
+        let tokens = Shared.FTSQuery.tokens(from: "swift-nio.EventLoop foo")
+        // Dash splits, dots within preserved
+        #expect(tokens.contains("nio.EventLoop") || tokens.contains("EventLoop"))
+        #expect(tokens.contains("swift"))
+        #expect(tokens.contains("foo"))
+    }
+
+    @Test("Single-character tokens dropped")
+    func dropsSingleChars() {
+        let tokens = Shared.FTSQuery.tokens(from: "a x foo")
+        #expect(!tokens.contains("a"))
+        #expect(!tokens.contains("x"))
+        #expect(tokens.contains("foo"))
+    }
+}

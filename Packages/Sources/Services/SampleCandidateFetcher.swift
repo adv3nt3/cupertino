@@ -42,18 +42,46 @@ public struct SampleCandidateFetcher: Search.CandidateFetcher {
         )
         let result = try await service.search(query)
 
-        return result.files.enumerated().map { idx, file in
+        var candidates: [Search.SmartCandidate] = []
+
+        // #238 follow-up: include project-level matches too. A natural-
+        // language query like "swiftui list animation" frequently scores
+        // a project's title/description/README without lighting up any
+        // single file's content via FTS5. Emitting only file matches
+        // dropped those projects entirely. Now both flow into RRF;
+        // SmartResult dedupe still collapses obvious duplicates.
+        for (idx, project) in result.projects.enumerated() {
+            // Project rows lack their own bm25 score; rank by ordinal
+            // (sample of arrival from the FTS query, best-first).
+            let pseudoScore = 1.0 / Double(idx + 1)
+            let chunk = project.readme.flatMap { readme -> String? in
+                let lines = readme.split(separator: "\n", omittingEmptySubsequences: false).prefix(20)
+                return lines.isEmpty ? nil : lines.joined(separator: "\n")
+            } ?? project.description
+            candidates.append(Search.SmartCandidate(
+                source: sourceName,
+                identifier: project.id,
+                title: project.title,
+                chunk: chunk,
+                rawScore: pseudoScore,
+                kind: "sampleProject",
+                metadata: [
+                    "projectId": project.id,
+                    "frameworks": project.frameworks.joined(separator: ","),
+                    "rank": String(idx + 1),
+                ]
+            ))
+        }
+
+        // File-level matches — same shape as before.
+        for (idx, file) in result.files.enumerated() {
             // Higher rawScore = better. samples.db FTS5 returns its
             // native BM25 score (lower = better). Invert sign to match
             // the convention used by every other fetcher in the
             // SmartQuery fan-out so reciprocal-rank-fusion sees
             // comparable scales.
             let rawScore = -file.rank
-
-            // FileSearchResult already carries an FTS5-extracted
-            // snippet — no further chunking needed. Title is the
-            // filename (lighter than the full relative path).
-            return Search.SmartCandidate(
+            candidates.append(Search.SmartCandidate(
                 source: sourceName,
                 identifier: "\(file.projectId)/\(file.path)",
                 title: file.filename.isEmpty ? file.path : file.filename,
@@ -65,7 +93,9 @@ public struct SampleCandidateFetcher: Search.CandidateFetcher {
                     "path": file.path,
                     "rank": String(idx + 1),
                 ]
-            )
+            ))
         }
+
+        return candidates
     }
 }
