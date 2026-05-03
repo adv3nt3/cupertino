@@ -466,8 +466,15 @@ extension Shared {
             /// Apple Human Interface Guidelines
             public static let appleHIG = "https://developer.apple.com/design/human-interface-guidelines/"
 
-            /// Apple Sample Code List
+            /// Apple Sample Code List (rendered HTML page)
             public static let appleSampleCode = "https://developer.apple.com/documentation/samplecode/"
+
+            /// Apple Sample Code List (raw JSON catalog).
+            /// Used by `SampleCodeDownloader.writeCatalogJSON` to dump fresh
+            /// metadata next to the downloaded zips so `cupertino save`
+            /// indexes from on-disk freshness instead of the embedded
+            /// snapshot (#214).
+            public static let appleSampleCodeJSON = "https://developer.apple.com/tutorials/data/documentation/samplecode.json"
 
             /// Apple Developer Account
             public static let appleDeveloperAccount = "https://developer.apple.com/account/"

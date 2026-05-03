@@ -9,6 +9,8 @@ import Foundation
 public enum SampleCodeCatalogEmbedded {
     public static let json: String = #"""
     {
+      "version": "2026-05-03",
+      "lastCrawled": "2026-05-03T13:00:00Z",
       "count": 619,
       "entries": [
         {

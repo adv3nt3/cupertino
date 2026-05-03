@@ -124,10 +124,106 @@ public final class SampleCodeDownloader {
 
         stats.endTime = Date()
 
+        // Write a fresh catalog.json next to the downloaded zips so a
+        // subsequent `cupertino save` indexes from this corpus instead of
+        // the stale `SampleCodeCatalogEmbedded` (#214). Best-effort: a
+        // failure here just logs a warning and leaves the embedded catalog
+        // as the fallback. The fetch-and-write source is Apple's
+        // `tutorials/data/documentation/samplecode.json`, which is also
+        // the source `scripts/generate-embedded-catalogs.sh` uses, so on-disk
+        // and embedded share schema.
+        await writeCatalogJSON()
+
         logInfo("\n✅ Download completed!")
         logStatistics(stats)
 
         return stats
+    }
+
+    /// Fetch Apple's sample-code listing JSON and write a `catalog.json`
+    /// next to the downloaded zips, in the same shape as
+    /// `SampleCodeCatalogJSON`. Best-effort; logs and returns on any error.
+    /// Exposed `internal` so tests can drive it independently of a full
+    /// `download()` run.
+    func writeCatalogJSON() async {
+        let catalogURL = outputDirectory.appendingPathComponent(SampleCodeCatalog.onDiskCatalogFilename)
+        do {
+            guard let listingURL = URL(string: Shared.Constants.BaseURL.appleSampleCodeJSON) else {
+                logError("Could not construct Apple sample-code listing URL — skipping catalog.json write.")
+                return
+            }
+            let (data, _) = try await URLSession.shared.data(from: listingURL)
+            guard let catalog = Self.transformAppleListingToCatalog(data: data) else {
+                logError("Could not transform Apple sample-code listing — skipping catalog.json write.")
+                return
+            }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let encoded = try encoder.encode(catalog)
+            try encoded.write(to: catalogURL, options: .atomic)
+            logInfo("📝 Wrote sample-code catalog: \(catalogURL.path) (\(catalog.count) entries)")
+        } catch {
+            logError("Failed to write catalog.json (\(error)) — `cupertino save` will fall back to embedded catalog.")
+        }
+    }
+
+    /// Transform Apple's `tutorials/data/documentation/samplecode.json` into
+    /// a `SampleCodeCatalogJSON`. Returns nil when the input doesn't decode
+    /// as expected. Pure on its inputs (no instance state, no MainActor
+    /// hop) so tests can call it directly from any context.
+    nonisolated static func transformAppleListingToCatalog(data: Data) -> SampleCodeCatalogJSON? {
+        guard let raw = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let refs = raw["references"] as? [String: [String: Any]] else {
+            return nil
+        }
+
+        var entries: [SampleCodeEntry] = []
+        for (_, ref) in refs {
+            guard ref["role"] as? String == "sampleCode",
+                  let title = ref["title"] as? String,
+                  let urlString = ref["url"] as? String else {
+                continue
+            }
+
+            // framework + slug from /documentation/<Framework>/<slug>
+            let parts = urlString.split(separator: "/").map(String.init)
+            guard parts.count >= 3 else { continue }
+            let framework = parts[1]
+            let slug = parts[2...].joined(separator: "/")
+
+            // description from abstract array
+            var description = ""
+            if let abstract = ref["abstract"] as? [[String: Any]] {
+                description = abstract.compactMap { $0["text"] as? String }.joined()
+            }
+
+            let zipFilename = "\(framework.lowercased().replacingOccurrences(of: "_", with: "-"))-\(slug).zip"
+            let webURL = "https://developer.apple.com\(urlString)"
+
+            entries.append(SampleCodeEntry(
+                title: title,
+                url: urlString,
+                framework: framework,
+                description: description,
+                zipFilename: zipFilename,
+                webURL: webURL
+            ))
+        }
+
+        entries.sort { lhs, rhs in
+            if lhs.framework.lowercased() == rhs.framework.lowercased() {
+                return lhs.title.lowercased() < rhs.title.lowercased()
+            }
+            return lhs.framework.lowercased() < rhs.framework.lowercased()
+        }
+
+        let now = ISO8601DateFormatter().string(from: Date())
+        return SampleCodeCatalogJSON(
+            version: "fetched",
+            lastCrawled: now,
+            count: entries.count,
+            entries: entries
+        )
     }
 
     // MARK: - Private Methods

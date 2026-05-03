@@ -486,7 +486,7 @@ extension Search {
             return files.filter {
                 $0.pathExtension == "md" &&
                     ($0.lastPathComponent.hasPrefix(Shared.Constants.Search.sePrefix) ||
-                     $0.lastPathComponent.hasPrefix(Shared.Constants.Search.stPrefix))
+                        $0.lastPathComponent.hasPrefix(Shared.Constants.Search.stPrefix))
             }
         }
 
@@ -1049,9 +1049,18 @@ extension Search {
         }
 
         private func indexSampleCodeCatalog(onProgress: (@Sendable (Int, Int) -> Void)?) async throws {
-            logInfo("📦 Indexing sample code catalog from bundled resources...")
-
+            // Loading the catalog now decides between the on-disk fresh
+            // catalog (written by the most recent `cupertino fetch --type code`)
+            // and the embedded fallback (#214). Touching `allEntries` is
+            // what triggers the underlying load + cache.
             let entries = await SampleCodeCatalog.allEntries
+            let source = await SampleCodeCatalog.loadedSource ?? .embedded
+            switch source {
+            case .onDisk:
+                logInfo("📦 Indexing sample code catalog from on-disk catalog.json (fresh fetch — #214)...")
+            case .embedded:
+                logInfo("📦 Indexing sample code catalog from bundled resources (embedded fallback — run `cupertino fetch --type code` to refresh)...")
+            }
 
             guard !entries.isEmpty else {
                 logInfo("⚠️  No sample code entries found in catalog")
