@@ -1,9 +1,12 @@
-// This file loads the Apple Sample Code Library from JSON
-// Last updated: 2025-11-17
-// JSON file: CupertinoResources/sample-code-catalog.json
+// This file loads the Apple Sample Code Library from JSON.
+//
+// Source of truth: `<sample-code-dir>/catalog.json` written by
+// `cupertino fetch --type code` (Apple's `samplecode.json` listing
+// transformed to the SampleCodeCatalogJSON shape). The previous
+// embedded blob (SampleCodeCatalogEmbedded) was deleted in #215 —
+// auto-discovery is the only path now.
 
 import Foundation
-import Resources
 import Shared
 
 /// Represents a sample code project from Apple
@@ -36,19 +39,28 @@ struct SampleCodeCatalogJSON: Codable {
     let entries: [SampleCodeEntry]
 }
 
-/// Complete catalog of all Apple sample code projects
+/// Complete catalog of all Apple sample code projects.
+///
+/// Reads from `<sample-code-dir>/catalog.json` (written by
+/// `cupertino fetch --type code`). Returns an empty catalog when no
+/// on-disk file exists or it fails to decode — there is no embedded
+/// fallback (#215). Callers (e.g. `SearchIndexBuilder`) should check
+/// `loadedSource` and warn the user when the catalog is missing so the
+/// fix is obvious: run fetch.
 public enum SampleCodeCatalog {
     /// File name written by `SampleCodeDownloader` next to the fetched zips
-    /// so `cupertino save` can pick up the freshly-discovered metadata
-    /// instead of the stale embedded snapshot. (#214)
+    /// so `cupertino save` can pick up the freshly-discovered metadata.
     public static let onDiskCatalogFilename = "catalog.json"
 
-    /// Source the catalog was loaded from on the most recent `loadCatalog` call.
-    /// Useful for telling users via the build log whether they're indexing from
-    /// fresh on-disk data or the embedded fallback.
+    /// Source the catalog was loaded from on the most recent `loadCatalog`
+    /// call. Useful for telling users via the build log whether their save
+    /// is indexing real data or skipping for lack of input.
     public enum Source: String, Sendable {
+        /// `<sample-code-dir>/catalog.json` was found and decoded successfully.
         case onDisk
-        case embedded
+        /// No on-disk catalog (file absent or unparseable). Caller should
+        /// hint at running `cupertino fetch --type code` to populate it.
+        case missing
     }
 
     /// Cached catalog data (thread-safe via actor isolation)
@@ -75,32 +87,61 @@ public enum SampleCodeCatalog {
     private static let cache = Cache()
 
     /// Reset the cached catalog. Used by tests to force `loadCatalog` to
-    /// re-evaluate the disk-vs-embedded preference between cases.
+    /// re-evaluate disk state between cases.
     public static func resetCache() async {
         await cache.clear()
     }
 
-    /// Load catalog. First checks `<sample-code-dir>/catalog.json` so a fresh
-    /// `cupertino fetch --type code` run surfaces in `cupertino save` (#214).
-    /// Falls back to the embedded catalog when no on-disk file exists or it
-    /// fails to decode. The decision is cached for the process lifetime.
+    /// Load catalog from `<sample-code-dir>/catalog.json`. Returns an empty
+    /// catalog if the file is missing or unparseable (#215: no embedded
+    /// fallback). The result + source are cached for the process lifetime;
+    /// call `resetCache` to re-evaluate. Honours
+    /// `setTestOverrideDirectory` so integration tests can sandbox.
     private static func loadCatalog() async -> SampleCodeCatalogJSON {
         if let cached = await cache.get() {
             return cached.0
         }
 
-        if let onDisk = loadFromDisk() {
+        if let onDisk = await loadFromDiskRespectingOverride() {
             await cache.set(onDisk, source: .onDisk)
             return onDisk
         }
 
-        let embedded = loadFromEmbedded()
-        await cache.set(embedded, source: .embedded)
-        return embedded
+        let empty = SampleCodeCatalogJSON(
+            version: "missing",
+            lastCrawled: "",
+            count: 0,
+            entries: []
+        )
+        await cache.set(empty, source: .missing)
+        return empty
+    }
+
+    /// Test-only override for the default sample-code directory. When set
+    /// via `setTestOverrideDirectory`, `loadFromDisk()` (no-arg) reads from
+    /// here instead of `Shared.Constants.defaultSampleCodeDirectory`. Lets
+    /// integration tests sandbox without polluting user data and without
+    /// requiring callers to plumb a directory through every API.
+    /// Production code must never set this.
+    private actor TestOverride {
+        var directory: URL?
+        func get() -> URL? { directory }
+        func set(_ url: URL?) { directory = url }
+    }
+
+    private static let testOverride = TestOverride()
+
+    /// Set a test-only override for the default sample-code directory.
+    /// Pass `nil` to clear. `internal` so production code can't reach it.
+    static func setTestOverrideDirectory(_ url: URL?) async {
+        await testOverride.set(url)
     }
 
     /// Read `<sample-code-dir>/catalog.json` if present and parseable.
-    /// `internal` so tests can drive it directly.
+    /// `internal` so tests can drive it directly. The no-arg form reads
+    /// from `Shared.Constants.defaultSampleCodeDirectory`; tests pass an
+    /// explicit path or use the async `loadFromDiskRespectingOverride`
+    /// below to honour the test override.
     static func loadFromDisk(at directory: URL? = nil) -> SampleCodeCatalogJSON? {
         let dir = directory ?? Shared.Constants.defaultSampleCodeDirectory
         let url = dir.appendingPathComponent(onDiskCatalogFilename)
@@ -108,22 +149,16 @@ public enum SampleCodeCatalog {
         return try? JSONDecoder().decode(SampleCodeCatalogJSON.self, from: data)
     }
 
-    /// Decode the embedded catalog. Crashes if the embedded resource is
-    /// missing or invalid (those are build-time guarantees).
-    static func loadFromEmbedded() -> SampleCodeCatalogJSON {
-        guard let data = CupertinoResources.jsonData(named: "sample-code-catalog") else {
-            fatalError("❌ sample-code-catalog embedded JSON missing — should be impossible")
-        }
-
-        do {
-            return try JSONDecoder().decode(SampleCodeCatalogJSON.self, from: data)
-        } catch {
-            fatalError("❌ Failed to decode embedded sample-code-catalog JSON: \(error)")
-        }
+    /// Async load that respects the test override. Production code calls
+    /// `loadCatalog` (which calls this); tests that want allEntries to
+    /// sandbox set the override via `setTestOverrideDirectory` first.
+    private static func loadFromDiskRespectingOverride() async -> SampleCodeCatalogJSON? {
+        let dir = await testOverride.get() ?? Shared.Constants.defaultSampleCodeDirectory
+        return loadFromDisk(at: dir)
     }
 
-    /// Which source the cached catalog was loaded from (on-disk or embedded).
-    /// Returns nil before the first `loadCatalog` call.
+    /// Which source the cached catalog was loaded from. Returns nil before
+    /// the first `loadCatalog` call.
     public static var loadedSource: Source? {
         get async {
             await cache.get()?.1

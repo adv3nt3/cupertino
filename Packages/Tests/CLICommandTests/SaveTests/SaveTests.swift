@@ -343,76 +343,22 @@ struct SaveCommandTests {
 
     // MARK: - Sample Code Catalog Tests
 
-    @Test("Index sample code catalog from bundled resources")
-    func indexSampleCodeCatalog() async throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cupertino-sample-code-test-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        print("🧪 Test: Index sample code catalog")
-
-        let searchDbPath = tempDir.appendingPathComponent("search.db")
-        let searchIndex = try await Search.Index(dbPath: searchDbPath)
-
-        let builder = Search.IndexBuilder(
-            searchIndex: searchIndex,
-            metadata: nil,
-            docsDirectory: tempDir,
-            evolutionDirectory: nil,
-            indexSampleCode: true
-        )
-
-        try await builder.buildIndex()
-
-        // Verify sample code was indexed
-        let sampleResults = try await searchIndex.searchSampleCode(query: "ARKit", limit: 10)
-        #expect(!sampleResults.isEmpty, "Should find sample code entries")
-
-        let totalSamples = try await searchIndex.sampleCodeCount()
-        #expect(totalSamples > 0, "Should have indexed sample code catalog")
-        #expect(totalSamples >= 500, "Should have hundreds of sample code entries")
-
-        print("   ✅ Indexed \(totalSamples) sample code entries")
-        print("   ✅ Sample code indexing test passed!")
-    }
-
-    @Test("Sample code catalog respects framework filter")
-    func sampleCodeFrameworkFilter() async throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cupertino-sample-filter-test-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        print("🧪 Test: Sample code framework filter")
-
-        let searchDbPath = tempDir.appendingPathComponent("search.db")
-        let searchIndex = try await Search.Index(dbPath: searchDbPath)
-
-        let builder = Search.IndexBuilder(
-            searchIndex: searchIndex,
-            metadata: nil,
-            docsDirectory: tempDir,
-            evolutionDirectory: nil,
-            indexSampleCode: true
-        )
-
-        try await builder.buildIndex()
-
-        // Search for ARKit samples
-        let arkitSamples = try await searchIndex.searchSampleCode(query: "tracking", framework: "ARKit", limit: 10)
-
-        // All results should be ARKit (compared case-insensitively: SearchIndex
-        // stores frameworks lowercased for case-insensitive matching; the test
-        // asserts intent, not the exact stored casing).
-        for sample in arkitSamples {
-            #expect(
-                sample.framework.lowercased() == "arkit",
-                "Filtered results should match framework (case-insensitive)"
-            )
-        }
-
-        print("   ✅ Sample code framework filter working")
-        print("   ✅ Framework filter test passed!")
-    }
+    // The two sample-code SaveTests cases that lived here previously
+    // ("Index sample code catalog from bundled resources" + "Sample code
+    // catalog respects framework filter") assumed `SampleCodeCatalog`
+    // always returned ~600 entries from the embedded blob. After #215
+    // deleted that blob, the catalog only exists when
+    // `<sample-code-dir>/catalog.json` is present, so a CI machine with
+    // no fetched data sees 0 entries and the tests fail.
+    //
+    // Replacement coverage:
+    //  - Disk-fixture loading + format invariants:
+    //    `Tests/CoreTests/SampleCodeCatalogTests.swift`
+    //  - Save→search-of-sample-code integration: deferred until we have a
+    //    test seam for injecting a sample-code dir into `SampleCodeCatalog`
+    //    (the cached load currently reads from
+    //    `Shared.Constants.defaultSampleCodeDirectory` directly, so a test
+    //    can't sandbox without polluting user data).
 
     // MARK: - Package Catalog Tests
 

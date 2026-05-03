@@ -24,14 +24,17 @@ public enum CupertinoResources {
     /// to a URL list in `SwiftPackagesCatalogEmbedded.urls` and is no longer
     /// exposed as a JSON blob. Consumers should use `Core.SwiftPackagesCatalog`
     /// directly instead of looking up the raw JSON.
+    ///
+    /// Note: `sample-code-catalog` was removed in #215. Auto-discovery via
+    /// `cupertino fetch --type code` is the source of truth; the fetched
+    /// catalog lands at `<sample-code-dir>/catalog.json` and is consumed by
+    /// `Core.SampleCodeCatalog.loadFromDisk(at:)`.
     public static func jsonData(named name: String) -> Data? {
         switch name {
         case "priority-packages":
             return PriorityPackagesEmbedded.data
         case "archive-guides-catalog":
             return ArchiveGuidesCatalogEmbedded.data
-        case "sample-code-catalog":
-            return SampleCodeCatalogEmbedded.data
         default:
             return nil
         }
@@ -44,8 +47,6 @@ public enum CupertinoResources {
             return PriorityPackagesEmbedded.json
         case "archive-guides-catalog":
             return ArchiveGuidesCatalogEmbedded.json
-        case "sample-code-catalog":
-            return SampleCodeCatalogEmbedded.json
         default:
             return nil
         }

@@ -1049,21 +1049,26 @@ extension Search {
         }
 
         private func indexSampleCodeCatalog(onProgress: (@Sendable (Int, Int) -> Void)?) async throws {
-            // Loading the catalog now decides between the on-disk fresh
-            // catalog (written by the most recent `cupertino fetch --type code`)
-            // and the embedded fallback (#214). Touching `allEntries` is
-            // what triggers the underlying load + cache.
+            // Sample-code catalog now lives ONLY on disk
+            // (<sample-code-dir>/catalog.json, written by
+            // `cupertino fetch --type code`). The previous embedded fallback
+            // was deleted in #215 — auto-discovery is the source of truth.
             let entries = await SampleCodeCatalog.allEntries
-            let source = await SampleCodeCatalog.loadedSource ?? .embedded
+            let source = await SampleCodeCatalog.loadedSource ?? .missing
             switch source {
             case .onDisk:
-                logInfo("📦 Indexing sample code catalog from on-disk catalog.json (fresh fetch — #214)...")
-            case .embedded:
-                logInfo("📦 Indexing sample code catalog from bundled resources (embedded fallback — run `cupertino fetch --type code` to refresh)...")
+                logInfo("📦 Indexing sample code catalog from on-disk catalog.json (#214)...")
+            case .missing:
+                let path = Shared.Constants.defaultSampleCodeDirectory
+                    .appendingPathComponent(SampleCodeCatalog.onDiskCatalogFilename)
+                    .path
+                logInfo("⚠️  No sample-code catalog at \(path) — skipping sample-code indexing.")
+                logInfo("    Run `cupertino fetch --type code` to populate the catalog, then re-run save.")
+                return
             }
 
             guard !entries.isEmpty else {
-                logInfo("⚠️  No sample code entries found in catalog")
+                logInfo("⚠️  Sample-code catalog parsed but contained zero entries; skipping.")
                 return
             }
 

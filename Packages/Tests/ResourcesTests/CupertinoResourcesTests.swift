@@ -11,11 +11,13 @@ import Testing
 
 @Suite("CupertinoResources embedded accessors (#161)")
 struct CupertinoResourcesTests {
-
+    // sample-code-catalog removed in #215 — auto-discovery via
+    // `cupertino fetch --type code` is the source of truth for sample-code
+    // metadata, materialized at `<sample-code-dir>/catalog.json` rather
+    // than in the binary.
     private static let knownNames = [
         "priority-packages",
         "archive-guides-catalog",
-        "sample-code-catalog",
     ]
 
     @Test("jsonData returns non-empty payload for every known catalog", arguments: knownNames)

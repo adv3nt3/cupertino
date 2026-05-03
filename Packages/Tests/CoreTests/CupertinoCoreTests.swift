@@ -14,67 +14,18 @@ import TestSupport
 
 // MARK: - SampleCodeCatalog Tests
 
-@Test("SampleCodeCatalog loads from JSON resource")
-func sampleCodeCatalogLoadsFromJSON() async throws {
-    let count = await SampleCodeCatalog.count
-    #expect(count > 500, "Should have hundreds of sample code entries")
-    #expect(count < 1000, "Sample count should be reasonable")
-    print("   ✅ Loaded \(count) sample code entries")
-}
-
-@Test("SampleCodeCatalog has correct metadata")
-func sampleCodeCatalogMetadata() async throws {
-    let version = await SampleCodeCatalog.version
-    let lastCrawled = await SampleCodeCatalog.lastCrawled
-
-    #expect(!version.isEmpty, "Version should not be empty")
-    #expect(!lastCrawled.isEmpty, "Last crawled date should not be empty")
-    print("   ✅ Version: \(version), Last crawled: \(lastCrawled)")
-}
-
-@Test("SampleCodeCatalog entries have required fields")
-func sampleCodeCatalogEntriesValid() async throws {
-    let entries = await SampleCodeCatalog.allEntries
-    #expect(!entries.isEmpty, "Should have at least one entry")
-
-    // Verify first entry has all required fields
-    let firstEntry = entries[0]
-    #expect(!firstEntry.title.isEmpty, "Entry should have title")
-    #expect(!firstEntry.url.isEmpty, "Entry should have URL")
-    #expect(!firstEntry.framework.isEmpty, "Entry should have framework")
-    #expect(!firstEntry.description.isEmpty, "Entry should have description")
-    #expect(!firstEntry.zipFilename.isEmpty, "Entry should have zipFilename")
-    #expect(!firstEntry.webURL.isEmpty, "Entry should have webURL")
-
-    print("   ✅ Sample entry: \(firstEntry.title)")
-}
-
-@Test("SampleCodeCatalog search works")
-func sampleCodeCatalogSearch() async throws {
-    let results = await SampleCodeCatalog.search("Swift")
-    #expect(!results.isEmpty, "Search for 'Swift' should return results")
-
-    // Verify search results contain the query
-    for result in results.prefix(5) {
-        let containsSwift = result.title.contains("Swift") || result.description.contains("Swift")
-        #expect(containsSwift, "Search result should contain 'Swift'")
-    }
-
-    print("   ✅ Found \(results.count) results for 'Swift'")
-}
-
-@Test("SampleCodeCatalog framework filtering works")
-func sampleCodeCatalogFrameworkFilter() async throws {
-    let swiftUIEntries = await SampleCodeCatalog.entries(for: "SwiftUI")
-    #expect(!swiftUIEntries.isEmpty, "Should have SwiftUI entries")
-
-    // Verify all results are for the correct framework
-    for entry in swiftUIEntries {
-        #expect(entry.framework.lowercased() == "swiftui", "Entry should be SwiftUI framework")
-    }
-
-    print("   ✅ Found \(swiftUIEntries.count) SwiftUI entries")
-}
+//
+// The 5 legacy tests in this section assumed the embedded catalog was
+// always populated (`SampleCodeCatalogEmbedded.json` was a build-time
+// blob with ~600 entries). After #215 deleted that blob, the catalog
+// only exists when `cupertino fetch --type code` has written
+// `<sample-code-dir>/catalog.json`, so a CI machine with no fetched
+// data would fail those tests.
+//
+// Replacement coverage for the on-disk flow (loading, fixture, search,
+// framework filter) lives in `SampleCodeCatalogTests.swift`, which uses
+// `loadFromDisk(at:)` against a temp-dir fixture and is independent of
+// any user / CI sample-code state.
 
 // MARK: - SwiftPackagesCatalog Tests
 

@@ -124,14 +124,12 @@ public final class SampleCodeDownloader {
 
         stats.endTime = Date()
 
-        // Write a fresh catalog.json next to the downloaded zips so a
-        // subsequent `cupertino save` indexes from this corpus instead of
-        // the stale `SampleCodeCatalogEmbedded` (#214). Best-effort: a
-        // failure here just logs a warning and leaves the embedded catalog
-        // as the fallback. The fetch-and-write source is Apple's
-        // `tutorials/data/documentation/samplecode.json`, which is also
-        // the source `scripts/generate-embedded-catalogs.sh` uses, so on-disk
-        // and embedded share schema.
+        // Write a fresh catalog.json next to the downloaded zips. After #215
+        // there is no embedded fallback — this file is the only source the
+        // search-index builder will read. If this write fails the user has
+        // to re-run fetch (or hand-roll a catalog.json); save will skip
+        // sample-code indexing with a clear hint pointing back here.
+        // Source: Apple's `tutorials/data/documentation/samplecode.json`.
         await writeCatalogJSON()
 
         logInfo("\n✅ Download completed!")
@@ -157,14 +155,22 @@ public final class SampleCodeDownloader {
                 logError("Could not transform Apple sample-code listing — skipping catalog.json write.")
                 return
             }
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let encoded = try encoder.encode(catalog)
-            try encoded.write(to: catalogURL, options: .atomic)
+            try Self.writeCatalog(catalog, to: catalogURL)
             logInfo("📝 Wrote sample-code catalog: \(catalogURL.path) (\(catalog.count) entries)")
         } catch {
-            logError("Failed to write catalog.json (\(error)) — `cupertino save` will fall back to embedded catalog.")
+            logError("Failed to write catalog.json (\(error)) — `cupertino save` will skip sample-code indexing.")
         }
+    }
+
+    /// Pure write step: serialize `catalog` to `url` atomically. Extracted
+    /// from `writeCatalogJSON` so unit tests can exercise the disk
+    /// behaviour without touching the network. `nonisolated` because
+    /// there's no instance state — it's a static utility.
+    nonisolated static func writeCatalog(_ catalog: SampleCodeCatalogJSON, to url: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let encoded = try encoder.encode(catalog)
+        try encoded.write(to: url, options: .atomic)
     }
 
     /// Transform Apple's `tutorials/data/documentation/samplecode.json` into

@@ -9,9 +9,14 @@
 # Workflow:
 #   1. Drop the updated source JSON into /tmp/catalogs/ (matching filenames:
 #      priority-packages.json, archive-guides-catalog.json,
-#      sample-code-catalog.json, swift-packages-catalog.json).
+#      swift-packages-catalog.json).
 #   2. Run this script.
 #   3. Commit the regenerated Swift files.
+#
+# Note: sample-code-catalog.json is NO LONGER embedded (#215). Sample-code
+# metadata is sourced from `<sample-code-dir>/catalog.json`, written at
+# fetch time by `cupertino fetch --type code`. If you place a
+# sample-code-catalog.json in /tmp/catalogs/, this script ignores it.
 #
 # NOTE: the swift-packages catalog is slimmed to URL list only (no metadata)
 # because the rich metadata will come from packages.db (v1.0.0+).
@@ -90,6 +95,11 @@ def emit_packages_url_list(json_path: pathlib.Path, out_path: pathlib.Path) -> N
     print(f'wrote SwiftPackagesCatalogEmbedded.swift ({len(urls)} URLs)')
 
 for json_path in sorted(src.glob('*.json')):
+    # sample-code-catalog is sourced from disk at fetch time (#215);
+    # never re-embed it as a Swift literal.
+    if json_path.name == 'sample-code-catalog.json':
+        print(f'skipping {json_path.name} (sample-code is on-disk only since #215)')
+        continue
     if json_path.name == 'swift-packages-catalog.json':
         emit_packages_url_list(json_path, dst / 'SwiftPackagesCatalogEmbedded.swift')
     else:
