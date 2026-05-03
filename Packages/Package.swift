@@ -25,6 +25,7 @@ let macOSOnlyProducts: [Product] = [
     .singleTargetLibrary("Services"),
     .singleTargetLibrary("Distribution"),
     .singleTargetLibrary("Diagnostics"),
+    .singleTargetLibrary("Indexer"),
     .singleTargetLibrary("Resources"),
     .singleTargetLibrary("Availability"),
     .singleTargetLibrary("ASTIndexer"),
@@ -236,6 +237,16 @@ let targets: [Target] = {
         dependencies: ["Diagnostics", "TestSupport"]
     )
 
+    // ---------- Indexer (#244: SaveCommand indexer + preflight lift) ----------
+    let indexerTarget = Target.target(
+        name: "Indexer",
+        dependencies: ["Search", "SampleIndex", "Core", "Shared", "Logging"]
+    )
+    let indexerTestsTarget = Target.testTarget(
+        name: "IndexerTests",
+        dependencies: ["Indexer", "Shared", "TestSupport"]
+    )
+
     let cliTarget = Target.executableTarget(
         name: "CLI",
         dependencies: [
@@ -247,6 +258,7 @@ let targets: [Target] = {
             "Services",
             "Distribution",
             "Diagnostics",
+            "Indexer",
             "Logging",
             "RemoteSync",
             "Availability",
@@ -318,7 +330,7 @@ let targets: [Target] = {
 
     let saveTestsTarget = Target.testTarget(
         name: "SaveTests",
-        dependencies: ["CLI", "Core", "Search", "Shared", "TestSupport"],
+        dependencies: ["CLI", "Core", "Indexer", "Search", "Shared", "TestSupport"],
         path: "Tests/CLICommandTests/SaveTests"
     )
 
@@ -361,6 +373,8 @@ let targets: [Target] = {
         distributionTestsTarget,
         diagnosticsTarget,
         diagnosticsTestsTarget,
+        indexerTarget,
+        indexerTestsTarget,
         mcpSupportTarget,
         mcpSupportTestsTarget,
         searchToolProviderTarget,

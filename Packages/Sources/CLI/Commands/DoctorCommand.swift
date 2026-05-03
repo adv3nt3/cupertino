@@ -2,6 +2,7 @@ import ArgumentParser
 import Core
 import Diagnostics
 import Foundation
+import Indexer
 import Logging
 import MCP
 import MCPSupport
@@ -65,7 +66,7 @@ struct DoctorCommand: AsyncParsableCommand {
         // its preflight summary.
         if save {
             Log.output("🔍 `cupertino save` preflight check\n")
-            let lines = SaveCommand.preflightLines(
+            let lines = Indexer.Preflight.preflightLines(
                 buildDocs: true,
                 buildPackages: true,
                 buildSamples: true
