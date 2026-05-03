@@ -98,25 +98,29 @@ struct AskCommand: AsyncParsableCommand {
             }
         }
 
+        // Validate the availability flags up front so the warning shown
+        // before results (#220 follow-up) sees the same source of truth as
+        // the packages fetcher.
+        let availabilityFilter: Search.PackageQuery.AvailabilityFilter?
+        switch (platform, minVersion) {
+        case let (platform?, minVersion?):
+            availabilityFilter = Search.PackageQuery.AvailabilityFilter(
+                platform: platform,
+                minVersion: minVersion
+            )
+        case (.some, nil), (nil, .some):
+            Logging.ConsoleLogger.error(
+                "❌ --platform and --min-version must be used together (#220)."
+            )
+            throw ExitCode.failure
+        case (nil, nil):
+            availabilityFilter = nil
+        }
+
         if !skipPackages {
             let packagesDBURL = packagesDb.map { URL(fileURLWithPath: $0).expandingTildeInPath }
                 ?? Shared.Constants.defaultPackagesDatabase
             if FileManager.default.fileExists(atPath: packagesDBURL.path) {
-                let availabilityFilter: Search.PackageQuery.AvailabilityFilter?
-                switch (platform, minVersion) {
-                case let (platform?, minVersion?):
-                    availabilityFilter = Search.PackageQuery.AvailabilityFilter(
-                        platform: platform,
-                        minVersion: minVersion
-                    )
-                case (.some, nil), (nil, .some):
-                    Logging.ConsoleLogger.error(
-                        "❌ --platform and --min-version must be used together (#220)."
-                    )
-                    throw ExitCode.failure
-                case (nil, nil):
-                    availabilityFilter = nil
-                }
                 fetchers.append(Search.PackageFTSCandidateFetcher(
                     dbPath: packagesDBURL,
                     availability: availabilityFilter
@@ -142,7 +146,13 @@ struct AskCommand: AsyncParsableCommand {
             await index.disconnect()
         }
 
-        Self.printReport(result: result, question: trimmed)
+        Self.printReport(
+            result: result,
+            question: trimmed,
+            availabilityFilterActive: availabilityFilter != nil,
+            platform: platform,
+            minVersion: minVersion
+        )
     }
 
     // MARK: - Helpers
@@ -159,7 +169,27 @@ struct AskCommand: AsyncParsableCommand {
         (Shared.Constants.SourcePrefix.swiftBook, false),
     ]
 
-    private static func printReport(result: Search.SmartResult, question: String) {
+    /// Sources whose results are NOT scoped by `--platform` / `--min-version`
+    /// (#220 follow-up). The packages source IS the only one that honours
+    /// the filter today; everything else returns its normal ranked list.
+    /// Used by `printReport` to emit a one-line notice so users can tell
+    /// which results were filtered and which weren't.
+    private static let unfilteredSourcesUnderPlatformFlag: [String] = [
+        Shared.Constants.SourcePrefix.appleDocs,
+        Shared.Constants.SourcePrefix.appleArchive,
+        Shared.Constants.SourcePrefix.hig,
+        Shared.Constants.SourcePrefix.swiftEvolution,
+        Shared.Constants.SourcePrefix.swiftOrg,
+        Shared.Constants.SourcePrefix.swiftBook,
+    ]
+
+    private static func printReport(
+        result: Search.SmartResult,
+        question: String,
+        availabilityFilterActive: Bool,
+        platform: String?,
+        minVersion: String?
+    ) {
         if result.candidates.isEmpty {
             let sources = result.contributingSources.isEmpty
                 ? "no sources responded"
@@ -171,6 +201,27 @@ struct AskCommand: AsyncParsableCommand {
 
         print("Question: \(question)")
         print("Searched: \(result.contributingSources.joined(separator: ", "))")
+
+        // #220 follow-up: when --platform / --min-version is set, surface a
+        // notice that doc-style sources don't honour the filter. Only print
+        // when at least one of those sources actually contributed a result —
+        // no need to confuse the user about a source that returned nothing.
+        if availabilityFilterActive,
+           let platform,
+           let minVersion {
+            let unfilteredContributing = result.contributingSources.filter {
+                unfilteredSourcesUnderPlatformFlag.contains($0)
+            }
+            if !unfilteredContributing.isEmpty {
+                print(
+                    "ℹ️  --platform \(platform) --min-version \(minVersion) only filters the "
+                        + "packages source. Results from "
+                        + unfilteredContributing.joined(separator: ", ")
+                        + " are unfiltered (different availability axes per source — see #220 / #225)."
+                )
+            }
+        }
+
         print("")
 
         for (idx, fused) in result.candidates.enumerated() {
