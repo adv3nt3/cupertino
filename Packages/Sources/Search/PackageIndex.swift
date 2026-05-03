@@ -102,8 +102,8 @@ extension Search {
             guard let database else {
                 throw PackageIndexError.databaseNotInitialized
             }
-            let packages = Int(try selectScalar("SELECT COUNT(*) FROM package_metadata"))
-            let files = Int(try selectScalar("SELECT COUNT(*) FROM package_files"))
+            let packages = try Int(selectScalar("SELECT COUNT(*) FROM package_metadata"))
+            let files = try Int(selectScalar("SELECT COUNT(*) FROM package_files"))
             let bytes = try selectScalar("SELECT IFNULL(SUM(size_bytes), 0) FROM package_files")
             _ = database
             return Summary(packageCount: packages, fileCount: files, bytesIndexed: bytes)
@@ -254,7 +254,7 @@ extension Search {
             resolved: Core.ResolvedPackage,
             file: Core.ExtractedFile
         ) throws {
-            guard let database else { throw PackageIndexError.databaseNotInitialized }
+            guard database != nil else { throw PackageIndexError.databaseNotInitialized }
 
             let insertPackageFileSQL = """
             INSERT INTO package_files (package_id, relpath, kind, module, size_bytes, indexed_at)
@@ -324,7 +324,9 @@ extension Search {
             guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else {
                 throw PackageIndexError.sqliteError(lastError(database))
             }
-            for binder in binders { _ = binder(statement) }
+            for binder in binders {
+                _ = binder(statement)
+            }
             guard sqlite3_step(statement) == SQLITE_DONE else {
                 throw PackageIndexError.sqliteError(lastError(database))
             }
@@ -364,7 +366,7 @@ extension Search {
         /// so camelCase and snake_case searches actually match. `makeHTTPRequest`
         /// becomes `makeHTTPRequest make HTTP Request`. `url_session_shared`
         /// becomes `url_session_shared url session shared`.
-        internal static func symbolTokens(from source: String) -> String {
+        static func symbolTokens(from source: String) -> String {
             guard let regex = try? NSRegularExpression(pattern: #"[A-Za-z_][A-Za-z0-9_]*"#) else {
                 return source
             }
@@ -385,7 +387,7 @@ extension Search {
         /// Split CamelCase / snake_case into space-separated words.
         /// `makeHTTPRequest` → `make HTTP Request`, `HTTPServer` → `HTTP Server`,
         /// `snake_case` → `snake case`.
-        internal static func splitIdentifier(_ input: String) -> String {
+        static func splitIdentifier(_ input: String) -> String {
             var result = input
             // lower -> upper
             result = result.replacingOccurrences(
@@ -407,7 +409,7 @@ extension Search {
         /// Pull a title out of each file so SELECT results have something scannable.
         /// For markdown, that's the first heading. For Swift, it's the filename.
         /// For everything else, the filename.
-        internal static func extractTitle(relpath: String, content: String) -> String {
+        static func extractTitle(relpath: String, content: String) -> String {
             let filename = (relpath as NSString).lastPathComponent
             if filename.hasSuffix(".md") || filename.hasSuffix(".markdown") {
                 for line in content.split(separator: "\n").prefix(50) {
@@ -434,6 +436,7 @@ extension Search {
     }
 }
 
-// SQLite3 convenience — the same constant SearchIndex uses, replicated here so this
-// file doesn't depend on Search/Index's private symbols.
+/// SQLite3 convenience — the same constant SearchIndex uses, replicated here so this
+/// file doesn't depend on Search/Index's private symbols.
+// swiftlint:disable:next identifier_name
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)

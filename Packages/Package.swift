@@ -147,7 +147,8 @@ let targets: [Target] = {
 
     let servicesTarget = Target.target(
         name: "Services",
-        dependencies: ["Shared", "Search", "SampleIndex"]
+        dependencies: ["Shared", "Search", "SampleIndex"],
+        exclude: ["README.md"]
     )
     let servicesTestsTarget = Target.testTarget(
         name: "ServicesTests",
@@ -241,7 +242,8 @@ let targets: [Target] = {
             "Search",
             "Resources",
             "Logging",
-        ]
+        ],
+        exclude: ["Views/BOX_DRAWING_RULES.md"]
     )
 
     let mockAIAgentTarget = Target.executableTarget(
@@ -258,7 +260,8 @@ let targets: [Target] = {
         dependencies: [
             .product(name: "ArgumentParser", package: "swift-argument-parser"),
             "Shared",
-        ]
+        ],
+        exclude: ["README.md"]
     )
     let releaseToolTestsTarget = Target.testTarget(
         name: "ReleaseToolTests",
@@ -303,7 +306,12 @@ let targets: [Target] = {
 
     let tuiTestsTarget = Target.testTarget(
         name: "TUITests",
-        dependencies: ["TUI", "Core", "Shared", "TestSupport"]
+        dependencies: ["TUI", "Core", "Shared", "TestSupport"],
+        exclude: [
+            "TEST_SUMMARY.md",
+            "HOW_TESTS_DETECT_BUGS.md",
+            "TEST_COVERAGE_ANALYSIS.md",
+        ]
     )
     let cliTestsTarget = Target.testTarget(
         name: "CLITests",
