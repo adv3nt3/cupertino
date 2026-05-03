@@ -191,8 +191,13 @@ extension Core {
             logInfo("\n✅ Crawl completed!")
             await logStatistics()
 
-            // Auto-generate priority package list if this was a Swift.org crawl
-            try await generatePriorityPackagesIfSwiftOrg()
+            // Removed in #213: the post-Swift.org crawl side-effect that
+            // overwrote `priority-packages.json` with the package-mention scan
+            // result has been disabled. `cupertino fetch --type swift` is now
+            // a pure Swift.org docs crawl. The `generatePriorityPackagesIfSwiftOrg`
+            // helper is retained below for a future opt-in
+            // `cupertino generate-priority-packages` subcommand or `--update-priority-packages`
+            // flag, but is no longer called as a fetch side-effect.
 
             return finalStats
         }
