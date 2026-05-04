@@ -693,3 +693,46 @@ struct TestPromptProvider: PromptProvider {
         return GetPromptResult(messages: [message])
     }
 }
+
+// MARK: - StdioTransport Trace Gate Tests
+
+@Suite("StdioTransport trace gating")
+struct StdioTransportTraceTests {
+    @Test("parseTraceFlag accepts canonical truthy values")
+    func parseTraceFlagTruthy() {
+        #expect(StdioTransport.parseTraceFlag("1"))
+        #expect(StdioTransport.parseTraceFlag("true"))
+        #expect(StdioTransport.parseTraceFlag("yes"))
+        #expect(StdioTransport.parseTraceFlag("TRUE"))
+        #expect(StdioTransport.parseTraceFlag("Yes"))
+        #expect(StdioTransport.parseTraceFlag("YES"))
+        #expect(StdioTransport.parseTraceFlag("True"))
+    }
+
+    @Test("parseTraceFlag rejects everything else")
+    func parseTraceFlagFalsy() {
+        #expect(!StdioTransport.parseTraceFlag(nil))
+        #expect(!StdioTransport.parseTraceFlag(""))
+        #expect(!StdioTransport.parseTraceFlag("0"))
+        #expect(!StdioTransport.parseTraceFlag("false"))
+        #expect(!StdioTransport.parseTraceFlag("no"))
+        #expect(!StdioTransport.parseTraceFlag("off"))
+        #expect(!StdioTransport.parseTraceFlag(" 1 "))
+        #expect(!StdioTransport.parseTraceFlag("on"))
+        #expect(!StdioTransport.parseTraceFlag("enable"))
+    }
+
+    @Test("StdioTransport env var name is the published constant")
+    func envVarName() {
+        #expect(StdioTransportEnvVar.trace == "CUPERTINO_MCP_TRACE")
+    }
+
+    @Test("StdioTransport accepts explicit traceEnabled override")
+    func explicitTraceOverride() async {
+        // Smoke test: both branches construct without crashing.
+        // Default-valued init signature preserved for existing callers.
+        _ = StdioTransport(traceEnabled: true)
+        _ = StdioTransport(traceEnabled: false)
+        _ = StdioTransport()
+    }
+}
