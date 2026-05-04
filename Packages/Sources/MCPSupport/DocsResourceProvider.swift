@@ -125,6 +125,9 @@ public actor DocsResourceProvider: ResourceProvider {
             let mdFilename = "\(components.filename)\(Shared.Constants.FileName.markdownExtension)"
             let mdPath = baseDir.appendingPathComponent(mdFilename)
 
+            try Self.assertContained(jsonPath, in: configuration.crawler.outputDirectory, uri: uri)
+            try Self.assertContained(mdPath, in: configuration.crawler.outputDirectory, uri: uri)
+
             if FileManager.default.fileExists(atPath: jsonPath.path) {
                 // Read JSON and extract rawMarkdown
                 let jsonData = try Data(contentsOf: jsonPath)
@@ -152,9 +155,16 @@ public actor DocsResourceProvider: ResourceProvider {
                 includingPropertiesForKeys: nil
             )
 
-            guard let file = files.first(where: { $0.lastPathComponent.hasPrefix(proposalID) }) else {
+            // Match either exact "SE-NNNN.md" or boundary-prefixed "SE-NNNN-...md" — bare
+            // hasPrefix would treat "S" as a match for every SE-* file in directory order.
+            guard let file = files.first(where: { url in
+                let stem = url.deletingPathExtension().lastPathComponent
+                return stem == proposalID || stem.hasPrefix("\(proposalID)-")
+            }) else {
                 throw ToolError.notFound(uri)
             }
+
+            try Self.assertContained(file, in: evolutionDirectory, uri: uri)
 
             // Read markdown content from filesystem
             markdown = try String(contentsOf: file, encoding: .utf8)
@@ -169,6 +179,8 @@ public actor DocsResourceProvider: ResourceProvider {
             let filePath = archiveDirectory
                 .appendingPathComponent(components.guideUID)
                 .appendingPathComponent("\(components.filename).md")
+
+            try Self.assertContained(filePath, in: archiveDirectory, uri: uri)
 
             guard FileManager.default.fileExists(atPath: filePath.path) else {
                 throw ToolError.notFound(uri)
@@ -256,7 +268,15 @@ public actor DocsResourceProvider: ResourceProvider {
             return nil
         }
 
-        return (framework: String(components[0]), filename: String(components[1]))
+        let framework = String(components[0])
+        let filename = String(components[1])
+
+        guard Self.isValidPathComponent(framework),
+              Self.isValidRelativePath(filename) else {
+            return nil
+        }
+
+        return (framework: framework, filename: filename)
     }
 
     private func parseEvolutionURI(_ uri: String) -> String? {
@@ -266,7 +286,10 @@ public actor DocsResourceProvider: ResourceProvider {
         }
 
         let proposalID = uri.replacingOccurrences(of: Shared.Constants.Search.swiftEvolutionScheme, with: "")
-        return proposalID.isEmpty ? nil : proposalID
+        guard Self.isValidPathComponent(proposalID) else {
+            return nil
+        }
+        return proposalID
     }
 
     private func extractTitle(from urlString: String) -> String {
@@ -326,6 +349,58 @@ public actor DocsResourceProvider: ResourceProvider {
             return nil
         }
 
-        return (guideUID: String(components[0]), filename: String(components[1]))
+        let guideUID = String(components[0])
+        let filename = String(components[1])
+
+        guard Self.isValidPathComponent(guideUID),
+              Self.isValidRelativePath(filename) else {
+            return nil
+        }
+
+        return (guideUID: guideUID, filename: filename)
+    }
+
+    // MARK: - Path Traversal Validation
+
+    /// `URL.appendingPathComponent` does NOT normalize ".." — the kernel resolves it at open(2),
+    /// so unchecked user-supplied components escape the configured base directory. We reject
+    /// suspicious components up front and re-verify containment after URL construction.
+    private static func isValidPathComponent(_ component: String) -> Bool {
+        guard !component.isEmpty,
+              component != ".",
+              component != ".." else {
+            return false
+        }
+        for scalar in component.unicodeScalars {
+            switch scalar {
+            case "/", "\\", "\0":
+                return false
+            default:
+                continue
+            }
+        }
+        return true
+    }
+
+    private static func isValidRelativePath(_ path: String) -> Bool {
+        guard !path.isEmpty else { return false }
+        let segments = path.split(separator: "/", omittingEmptySubsequences: false)
+        for segment in segments where !isValidPathComponent(String(segment)) {
+            return false
+        }
+        return true
+    }
+
+    private static func assertContained(_ candidate: URL, in base: URL, uri: String) throws {
+        let standardizedBase = base.standardizedFileURL.resolvingSymlinksInPath()
+        let standardizedCandidate = candidate.standardizedFileURL.resolvingSymlinksInPath()
+
+        let basePath = standardizedBase.path
+        let candidatePath = standardizedCandidate.path
+        let boundary = basePath.hasSuffix("/") ? basePath : basePath + "/"
+
+        guard candidatePath == basePath || candidatePath.hasPrefix(boundary) else {
+            throw ToolError.invalidURI(uri)
+        }
     }
 }
