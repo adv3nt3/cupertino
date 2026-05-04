@@ -25,6 +25,7 @@ playground.xcworkspace
 *.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings
 *.xcworkspace/xcuserdata/
 DerivedData/
+.derived-data-log-*
 *.xcuserstate
 *.xcscmblueprint
 *.xccheckout
