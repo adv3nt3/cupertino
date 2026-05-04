@@ -166,6 +166,22 @@ cupertino fetch --type samples
 cupertino save
 ```
 
+### Optional: GitHub authentication
+
+Cupertino reads an optional `GITHUB_TOKEN` env var to lift the GitHub API rate limit when fetching its documentation index. Without one, you fall back to GitHub's unauthenticated limit of 60 requests/hour — the tool still works, you'll just hit the cap sooner on large fetches.
+
+The token is read from the environment and sent only to `https://api.github.com` over HTTPS. A fine-grained token with `read:public_repo` scope is sufficient; `repo` scope is not needed.
+
+```bash
+export GITHUB_TOKEN=ghp_...
+# Or, if you have the GitHub CLI configured:
+export GITHUB_TOKEN=$(gh auth token)
+```
+
+> **Caveat:** any process inheriting this shell environment can read the token. If that's a concern, run Cupertino in a dedicated terminal with a narrowly-scoped fine-grained token, or omit the token entirely.
+
+Maintainers publishing pre-built database releases can set `CUPERTINO_DOCS_TOKEN` instead; if unset, the release tool falls back to `GITHUB_TOKEN`. End users do not need it.
+
 ### Use with Claude Desktop
 
 1. **Configure Claude Desktop** - Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
