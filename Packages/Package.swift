@@ -97,7 +97,7 @@ let targets: [Target] = {
     )
     let sharedTestsTarget = Target.testTarget(
         name: "SharedTests",
-        dependencies: ["Shared", "TestSupport"]
+        dependencies: ["Shared", "MCP", "TestSupport"]
     )
 
     // Resources target (#161): catalogs are now compiled in as Swift string

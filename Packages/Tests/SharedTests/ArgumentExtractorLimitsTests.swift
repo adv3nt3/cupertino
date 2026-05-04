@@ -1,4 +1,5 @@
 import Foundation
+import MCP
 @testable import Shared
 import Testing
 
