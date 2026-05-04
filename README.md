@@ -47,7 +47,7 @@ Cupertino is a local, structured, AI-ready documentation system for Apple platfo
 **One-command install (recommended):**
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/mihaelamj/cupertino/main/install.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/adv3nt3/cupertino/main/install.sh)
 ```
 
 This downloads a pre-built, signed, and notarized universal binary, installs it to `/usr/local/bin`, and downloads the documentation databases. The installer automatically verifies the SHA256 checksum of the downloaded binary.
@@ -58,8 +58,8 @@ For environments where you prefer to verify the installer script before executio
 
 ```bash
 # Download installer and checksum
-curl -o install.sh https://raw.githubusercontent.com/mihaelamj/cupertino/main/install.sh
-curl -o install.sh.sha256 https://raw.githubusercontent.com/mihaelamj/cupertino/main/install.sh.sha256
+curl -o install.sh https://raw.githubusercontent.com/adv3nt3/cupertino/main/install.sh
+curl -o install.sh.sha256 https://raw.githubusercontent.com/adv3nt3/cupertino/main/install.sh.sha256
 
 # Verify script integrity (if checksum available)
 shasum -a 256 -c install.sh.sha256
@@ -81,7 +81,7 @@ cupertino setup
 **Or build from source:**
 
 ```bash
-git clone https://github.com/mihaelamj/cupertino.git
+git clone https://github.com/adv3nt3/cupertino.git
 cd cupertino
 
 # Using Makefile (recommended)
@@ -347,7 +347,7 @@ cupertino setup
 
 ```bash
 # Install the cupertino skill from GitHub
-npx openskills install mihaelamj/cupertino
+npx openskills install adv3nt3/cupertino
 
 # Sync to update AGENTS.md
 npx openskills sync
@@ -355,19 +355,19 @@ npx openskills sync
 
 For global installation (available in all projects):
 ```bash
-npx openskills install mihaelamj/cupertino --global
+npx openskills install adv3nt3/cupertino --global
 ```
 
 For multi-agent setups (installs to `.agent/skills/` instead of `.claude/skills/`):
 ```bash
-npx openskills install mihaelamj/cupertino --universal
+npx openskills install adv3nt3/cupertino --universal
 ```
 
 **Option B: Install as a Claude Code Plugin**
 
 Inside a Claude Code session, add the cupertino marketplace:
 ```
-/plugin marketplace add mihaelamj/cupertino
+/plugin marketplace add adv3nt3/cupertino
 ```
 
 Then enable the plugin from the marketplace.
@@ -377,7 +377,7 @@ Then enable the plugin from the marketplace.
 Copy the skill definition to your project or global skills directory:
 ```bash
 # Clone this repo
-git clone https://github.com/mihaelamj/cupertino.git
+git clone https://github.com/adv3nt3/cupertino.git
 
 # For a single project
 mkdir -p .claude/skills/cupertino
@@ -766,7 +766,7 @@ Each command has detailed documentation:
 
 Issues and pull requests are welcome! I'd love to hear how you're using Cupertino with your AI workflow.
 
-For questions and discussion, use [GitHub Discussions](https://github.com/mihaelamj/cupertino/discussions).
+For questions and discussion, use [GitHub Discussions](https://github.com/adv3nt3/cupertino/discussions).
 
 I prefer collaboration over competition — if you're working on something similar, let's find ways to work together.
 
@@ -808,8 +808,8 @@ The docs and sample-code repositories will be used by the planned `make install 
 
 ## Support
 
-- **Issues:** [GitHub Issues](https://github.com/mihaelamj/cupertino/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/mihaelamj/cupertino/discussions)
+- **Issues:** [GitHub Issues](https://github.com/adv3nt3/cupertino/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/adv3nt3/cupertino/discussions)
 
 ---
 

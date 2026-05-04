@@ -4,7 +4,7 @@
 # One-command install for macOS
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/mihaelamj/cupertino/main/install.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/adv3nt3/cupertino/main/install.sh | bash
 #
 # Options:
 #   --build    Force build from source instead of downloading binary
@@ -20,7 +20,7 @@
 set -e
 
 # Configuration
-REPO="mihaelamj/cupertino"
+REPO="adv3nt3/cupertino"
 INSTALL_PATH="/usr/local/bin/cupertino"
 FORCE_BUILD=false
 SKIP_PROMPT=false
@@ -263,5 +263,5 @@ echo ""
 echo "  3. Or add to Claude Code:"
 echo -e "     ${BLUE}claude mcp add cupertino -- /usr/local/bin/cupertino${NC}"
 echo ""
-echo "Documentation: https://github.com/mihaelamj/cupertino"
+echo "Documentation: https://github.com/adv3nt3/cupertino"
 echo ""
