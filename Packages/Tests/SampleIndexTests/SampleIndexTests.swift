@@ -52,6 +52,7 @@ struct SampleIndexTests {
     }
 }
 
+<<<<<<< HEAD
 // MARK: - #228 phase 2: availability columns on samples.db
 
 @Suite("samples.db availability persistence (#228 phase 2)")
@@ -177,5 +178,28 @@ struct SamplesAvailabilityPersistenceTests {
 
         let fetched = try await database.getFile(projectId: "p1", path: "Sources/Foo.swift")
         #expect(fetched?.availableAttrsJSON == json)
+    }
+}
+
+// MARK: - SampleIndexDatabase SQL Injection Tests
+
+@Suite("SampleIndexDatabase SQL safety")
+struct SampleIndexDatabaseSQLSafetyTests {
+    @Test("getFile with SQL injection metacharacters in path returns nil without throwing")
+    func getFileWithSQLInjectionPath() async throws {
+        let tempDB = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sampleindex-sqlinject-\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(at: tempDB) }
+
+        let database = try await SampleIndex.Database(dbPath: tempDB)
+
+        // Parameterized binding means the injection payload is treated as a literal string;
+        // the call must return nil (no matching row) rather than throw or modify the schema.
+        let result = try await database.getFile(
+            projectId: "test",
+            path: "'; DROP TABLE files;--"
+        )
+        await database.disconnect()
+        #expect(result == nil)
     }
 }

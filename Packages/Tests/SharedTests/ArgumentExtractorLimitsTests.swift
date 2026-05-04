@@ -93,4 +93,22 @@ struct ArgumentExtractorLimitsTests {
             Issue.record("unexpected error type: \(error)")
         }
     }
+
+    @Test("platform version filter accessors all reject oversized strings")
+    func platformVersionAccessorsRejectOversizedStrings() {
+        let oversized = String(repeating: "1", count: 17 * 1024)
+        let extractor = ArgumentExtractor([
+            Shared.Constants.Search.schemaParamMinIOS: AnyCodable(oversized),
+            Shared.Constants.Search.schemaParamMinMacOS: AnyCodable(oversized),
+            Shared.Constants.Search.schemaParamMinTvOS: AnyCodable(oversized),
+            Shared.Constants.Search.schemaParamMinWatchOS: AnyCodable(oversized),
+            Shared.Constants.Search.schemaParamMinVisionOS: AnyCodable(oversized),
+        ])
+
+        #expect(throws: ToolError.self) { _ = try extractor.minIOS() }
+        #expect(throws: ToolError.self) { _ = try extractor.minMacOS() }
+        #expect(throws: ToolError.self) { _ = try extractor.minTvOS() }
+        #expect(throws: ToolError.self) { _ = try extractor.minWatchOS() }
+        #expect(throws: ToolError.self) { _ = try extractor.minVisionOS() }
+    }
 }
