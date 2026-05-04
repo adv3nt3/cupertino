@@ -2255,6 +2255,31 @@ extension Search {
         /// See Shared.Constants.SourcePrefix for available prefixes.
         private static let knownSourcePrefixes = Shared.Constants.SourcePrefix.allPrefixes
 
+        /// Apple-docs framework authority used as a HEURISTIC 1 tiebreak (#256).
+        ///
+        /// Only consulted when an apple-docs row already hit the exact-title boost
+        /// in HEURISTIC 1 — i.e. multiple frameworks have a top-level page whose
+        /// title equals the query (e.g. `Result` on Swift, Vision, Installer JS).
+        /// At that point BM25F has nothing useful to say about which framework is
+        /// canonical for the bare type name. The map nudges the canonical pick.
+        ///
+        /// Values are multipliers on `boost` (lower = stronger boost; FTS5 ranks
+        /// are negative so smaller multipliers push higher). Frameworks not in
+        /// the map default to 1.0 (no nudge).
+        ///
+        /// Kept narrow on purpose: only frameworks with an actual canonical-page
+        /// conflict whose resolution is uncontroversial. Adding a framework here
+        /// is an authority claim — be conservative.
+        private static let frameworkAuthority: [String: Double] = [
+            "swift": 0.5, // language types (Result, Task, String, ...)
+            "swiftui": 0.7, // primary UI framework
+            "foundation": 0.7, // primary system framework
+            "installer_js": 1.4, // niche packaging-script API
+            "webkitjs": 1.4, // legacy WebKit JS bindings
+            "javascriptcore": 1.2, // JS bridge
+            "devicemanagement": 1.2, // MDM payload schemas
+        ]
+
         /// Extract source prefix from query if present.
         /// - Returns: (detectedSource, remainingQuery)
         /// - Example: "swift-evolution actors" -> ("swift-evolution", "actors")
@@ -2835,6 +2860,47 @@ extension Search {
                             boost *= 0.02 // 50x boost - canonical Apple-curated page
                         } else {
                             boost *= 0.05 // 20x boost - user typed exact name
+                        }
+
+                        // HEURISTIC 1.5: Tiebreak inside exact-title peers (#256)
+                        //
+                        // After the boost above fires, multiple apple-docs rows can
+                        // still tie — `Result` matches Swift's enum, Vision's
+                        // associated type ON `VisionRequest`, and Installer JS's
+                        // runtime type, and all three carry title "Result".
+                        // BM25F then decides among them, and BM25F has no opinion
+                        // about which framework is canonical for a bare type name.
+                        //
+                        // Two orthogonal signals separate canonical from peer:
+                        //
+                        // (1) URI simplicity. `documentation_FRAMEWORK_QUERY`
+                        //     exactly is the framework's top-level type page;
+                        //     anything deeper is a sub-symbol whose title happens
+                        //     to shadow a top-level type elsewhere.
+                        //
+                        // (2) Framework authority (`frameworkAuthority` map).
+                        //     Only consulted in this narrow branch — exact-title
+                        //     match in apple-docs.
+                        //
+                        // Out of scope: when corpus `kind` extraction improves,
+                        // an enum/struct/class/protocol tier slots ahead of these.
+                        // Today ~49% of apple-docs rows have kind=unknown
+                        // (depending on metadata extraction), so kind alone can't
+                        // separate canonical from sub-symbol.
+                        if uriLower.hasPrefix("apple-docs://") {
+                            let pathPart = uriLower
+                                .replacingOccurrences(of: "apple-docs://", with: "")
+                            let parts = pathPart.components(separatedBy: "/")
+                            if parts.count == 2 {
+                                let docPrefix = "documentation_\(parts[0])_"
+                                let queryAsIdent = queryLowerJoined
+                                    .replacingOccurrences(of: " ", with: "")
+                                if parts[1].hasPrefix(docPrefix),
+                                   String(parts[1].dropFirst(docPrefix.count)) == queryAsIdent {
+                                    boost *= 0.6 // ~1.7x: top-level type page beats sub-symbols
+                                }
+                            }
+                            boost *= Self.frameworkAuthority[framework.lowercased()] ?? 1.0
                         }
                     }
                     // First word exact match (very strong signal)
