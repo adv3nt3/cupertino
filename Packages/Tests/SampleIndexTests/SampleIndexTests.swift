@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import SampleIndex
@@ -49,5 +50,28 @@ struct SampleIndexTests {
         #expect(project.id == "sample-app")
         #expect(project.frameworks == ["swiftui", "combine"]) // lowercased
         #expect(project.fileCount == 10)
+    }
+}
+
+// MARK: - SampleIndexDatabase SQL Injection Tests
+
+@Suite("SampleIndexDatabase SQL safety")
+struct SampleIndexDatabaseSQLSafetyTests {
+    @Test("getFile with SQL injection metacharacters in path returns nil without throwing")
+    func getFileWithSQLInjectionPath() async throws {
+        let tempDB = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sampleindex-sqlinject-\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(at: tempDB) }
+
+        let database = try await SampleIndex.Database(dbPath: tempDB)
+
+        // Parameterized binding means the injection payload is treated as a literal string;
+        // the call must return nil (no matching row) rather than throw or modify the schema.
+        let result = try await database.getFile(
+            projectId: "test",
+            path: "'; DROP TABLE files;--"
+        )
+        await database.disconnect()
+        #expect(result == nil)
     }
 }

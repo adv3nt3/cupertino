@@ -49,9 +49,9 @@ let allProducts = baseProducts + macOSOnlyProducts
 
 let deps: [Package.Dependency] = [
     // Swift Argument Parser (cross-platform CLI tool)
-    .package(url: "https://github.com/apple/swift-argument-parser", .upToNextMinor(from: "1.6.0")),
+    .package(url: "https://github.com/apple/swift-argument-parser", .upToNextMinor(from: "1.7.0")),
     // SwiftSyntax for AST parsing (#81)
-    .package(url: "https://github.com/swiftlang/swift-syntax", .upToNextMinor(from: "600.0.0")),
+    .package(url: "https://github.com/swiftlang/swift-syntax", .upToNextMinor(from: "603.0.0")),
 ]
 
 // -------------------------------------------------------------
@@ -93,7 +93,7 @@ let targets: [Target] = {
     )
     let sharedTestsTarget = Target.testTarget(
         name: "SharedTests",
-        dependencies: ["Shared", "TestSupport"]
+        dependencies: ["Shared", "MCP", "TestSupport"]
     )
 
     let resourcesTarget = Target.target(
@@ -257,7 +257,7 @@ let targets: [Target] = {
         dependencies: ["ReleaseTool"]
     )
 
-    let testSupportTarget = Target.target(
+    let testSupportTarget = Target.testTarget(
         name: "TestSupport",
         dependencies: []
     )

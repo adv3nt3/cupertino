@@ -549,6 +549,54 @@ func getDocumentContentJSON() async throws {
     await index.disconnect()
 }
 
+// MARK: - FTS5 Query Sanitization Tests
+
+@Suite("SearchIndex FTS5 query sanitization", .serialized)
+struct SearchIndexFTS5SanitizationTests {
+    // sanitizeFTS5Query is private; exercised indirectly through the public search API.
+    // The suite confirms that pathological query shapes don't throw or crash — the function
+    // wraps each whitespace/hyphen-split term in double-quotes before executing FTS5.
+
+    @Test("hyphenated query does not crash search")
+    func hyphenatedQuery() async throws {
+        let (index, cleanup) = try await createTestSearchIndexWithDocument(
+            title: "Concurrency Actors",
+            content: "Swift concurrency actors isolation"
+        )
+        defer { try? cleanup() }
+
+        // "concurrency-actors" is split on "-", producing "concurrency" and "actors"
+        let results = try await index.search(query: "concurrency-actors", limit: 10)
+        // Result count is not asserted; the search must not throw.
+        _ = results
+        await index.disconnect()
+    }
+
+    @Test("query containing embedded double-quotes does not throw")
+    func embeddedDoubleQuoteQuery() async throws {
+        let (index, cleanup) = try await createTestSearchIndex()
+        defer { try? cleanup() }
+
+        // A literal double-quote in the query is wrapped inside another pair by sanitizeFTS5Query
+        // producing `""foo""` — FTS5 treats that as an empty phrase + "foo" rather than a
+        // syntax error; the call must complete without throwing.
+        let results = try await index.search(query: "say \"hello\" world", limit: 10)
+        _ = results
+        await index.disconnect()
+    }
+
+    @Test("query with control characters does not throw")
+    func controlCharacterQuery() async throws {
+        let (index, cleanup) = try await createTestSearchIndex()
+        defer { try? cleanup() }
+
+        // Newlines and tabs are whitespace separators; split-and-quote should produce valid FTS5.
+        let results = try await index.search(query: "swift\nconcurrency\tactors", limit: 10)
+        _ = results
+        await index.disconnect()
+    }
+}
+
 @Test("getDocumentContent FTS fallback wraps content in JSON for JSON format")
 func getDocumentContentFTSFallbackJSON() async throws {
     let tempDB = FileManager.default.temporaryDirectory.appendingPathComponent("test-\(UUID().uuidString).db")

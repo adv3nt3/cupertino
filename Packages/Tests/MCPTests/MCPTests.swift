@@ -691,4 +691,14 @@ struct StdioTransportTraceTests {
         _ = StdioTransport(traceEnabled: false)
         _ = StdioTransport()
     }
+
+    @Test("parseTraceFlag rejects non-ASCII whitespace padding around truthy values")
+    func parseTraceFlagNonAsciiWhitespace() {
+        // U+00A0 NO-BREAK SPACE, U+2028 LINE SEPARATOR, U+FEFF BOM — none collapse
+        // to ASCII space under lowercased(), so "1" surrounded by them is not "1".
+        #expect(!StdioTransport.parseTraceFlag("\u{00A0}1"))
+        #expect(!StdioTransport.parseTraceFlag("1\u{2028}"))
+        #expect(!StdioTransport.parseTraceFlag("\u{FEFF}true"))
+        #expect(!StdioTransport.parseTraceFlag("\u{00A0}yes\u{00A0}"))
+    }
 }

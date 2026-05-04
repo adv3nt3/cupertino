@@ -1005,6 +1005,45 @@ struct UnifiedSearchFormatterTests {
     }
 }
 
+// MARK: - Argument Key-Count Guard Tests
+
+@Suite("CompositeToolProvider argument key-count guard", .serialized)
+struct CompositeToolProviderArgumentGuardTests {
+    @Test("callTool throws ToolError when argument dict exceeds 50 keys")
+    func throws51Keys() async throws {
+        let (index, cleanup) = try await createTestSearchIndex()
+        defer { try? cleanup() }
+        let provider = CompositeToolProvider(searchIndex: index, sampleDatabase: nil)
+
+        var oversized: [String: AnyCodable] = [:]
+        for i in 0 ..< 51 {
+            oversized["k\(i)"] = AnyCodable("v")
+        }
+
+        await #expect(throws: ToolError.self) {
+            _ = try await provider.callTool(name: "list_frameworks", arguments: oversized)
+        }
+        await index.disconnect()
+    }
+
+    @Test("callTool passes argument validation with exactly 50 keys")
+    func passes50Keys() async throws {
+        let (index, cleanup) = try await createTestSearchIndex()
+        defer { try? cleanup() }
+        let provider = CompositeToolProvider(searchIndex: index, sampleDatabase: nil)
+
+        var atCap: [String: AnyCodable] = [:]
+        for i in 0 ..< 50 {
+            atCap["k\(i)"] = AnyCodable("v")
+        }
+
+        // list_frameworks ignores extra keys; confirm no ToolError.invalidArgument is thrown.
+        let result = try await provider.callTool(name: "list_frameworks", arguments: atCap)
+        #expect(!result.content.isEmpty)
+        await index.disconnect()
+    }
+}
+
 // MARK: - Integration Tests
 
 @Suite("Search Integration", .tags(.integration), .serialized)
