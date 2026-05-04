@@ -93,7 +93,7 @@ let targets: [Target] = {
     )
     let sharedTestsTarget = Target.testTarget(
         name: "SharedTests",
-        dependencies: ["Shared", "TestSupport"]
+        dependencies: ["Shared", "MCP", "TestSupport"]
     )
 
     let resourcesTarget = Target.target(
