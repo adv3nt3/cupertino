@@ -50,7 +50,25 @@ Cupertino is a local, structured, AI-ready documentation system for Apple platfo
 bash <(curl -sSL https://raw.githubusercontent.com/mihaelamj/cupertino/main/install.sh)
 ```
 
-This downloads a pre-built, signed, and notarized universal binary, installs it to `/usr/local/bin`, and downloads the documentation databases.
+This downloads a pre-built, signed, and notarized universal binary, installs it to `/usr/local/bin`, and downloads the documentation databases. The installer automatically verifies the SHA256 checksum of the downloaded binary.
+
+**Safer manual install (with explicit integrity verification):**
+
+For environments where you prefer to verify the installer script before execution:
+
+```bash
+# Download installer and checksum
+curl -o install.sh https://raw.githubusercontent.com/mihaelamj/cupertino/main/install.sh
+curl -o install.sh.sha256 https://raw.githubusercontent.com/mihaelamj/cupertino/main/install.sh.sha256
+
+# Verify script integrity (if checksum available)
+shasum -a 256 -c install.sh.sha256
+
+# Run installer
+bash install.sh
+```
+
+The install script downloads a pre-built binary and automatically verifies its SHA256 checksum against the published artifact. If verification fails, the installation is aborted.
 
 **Or with Homebrew:**
 
@@ -148,6 +166,22 @@ cupertino fetch --type samples
 # Build search index (~2-5 minutes)
 cupertino save
 ```
+
+### Optional: GitHub authentication
+
+Cupertino reads an optional `GITHUB_TOKEN` env var to lift the GitHub API rate limit when fetching its documentation index. Without one, you fall back to GitHub's unauthenticated limit of 60 requests/hour — the tool still works, you'll just hit the cap sooner on large fetches.
+
+The token is read from the environment and sent only to `https://api.github.com` over HTTPS. A fine-grained token with `read:public_repo` scope is sufficient; `repo` scope is not needed.
+
+```bash
+export GITHUB_TOKEN=ghp_...
+# Or, if you have the GitHub CLI configured:
+export GITHUB_TOKEN=$(gh auth token)
+```
+
+> **Caveat:** any process inheriting this shell environment can read the token. If that's a concern, run Cupertino in a dedicated terminal with a narrowly-scoped fine-grained token, or omit the token entirely.
+
+Maintainers publishing pre-built database releases can set `CUPERTINO_DOCS_TOKEN` instead; if unset, the release tool falls back to `GITHUB_TOKEN`. End users do not need it.
 
 ### Use with Claude Desktop
 

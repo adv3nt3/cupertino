@@ -543,6 +543,12 @@ extension Shared {
 
             /// Cupertino docs token environment variable (for database releases)
             public static let cupertinoDocsToken = "CUPERTINO_DOCS_TOKEN"
+
+            /// MCP stdio trace flag. Opt-in: any of "1"/"true"/"yes" (case-insensitive)
+            /// enables full JSON-RPC body logging to stderr. Default off to prevent
+            /// tool args / response bodies from being persisted in Claude Desktop logs.
+            /// Mirrored at MCP/Transport/StdioTransport.swift (MCP target has no Shared dep).
+            public static let mcpStdioTrace = "CUPERTINO_MCP_TRACE"
         }
 
         // MARK: - Search Constants
