@@ -2806,8 +2806,14 @@ extension Search {
                     }
 
                     // HEURISTIC 1: Short query exact title match (user knows what they want)
-                    // "View" searching for "View" protocol = almost certainly what they want
-                    if queryWords.count <= 3, titleLower == queryWords.joined(separator: " ") {
+                    // "View" searching for "View" protocol = almost certainly what they want.
+                    // Compare against `titleWithoutSuffix` (boilerplate stripped) so the
+                    // ~28% of apple-docs pages whose `<title>` includes the
+                    // " | Apple Developer Documentation" suffix still trigger this boost.
+                    // Without this, BM25 field-length normalization buries canonical
+                    // type pages (`Task`, `View`, `URLSession`) under shorter clean-titled
+                    // siblings (kernel `task_*` C functions, devicemanagement `View`, etc.).
+                    if queryWords.count <= 3, titleWithoutSuffix == queryLowerJoined {
                         boost *= 0.05 // 20x boost - user typed exact name
                     }
                     // First word exact match (very strong signal)
