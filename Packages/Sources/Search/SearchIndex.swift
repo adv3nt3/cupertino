@@ -2494,9 +2494,15 @@ extension Search {
                 sql += " AND m.min_visionos IS NOT NULL"
             }
 
-            // Fetch significantly more results so title/kind boosts can surface buried gems
-            // View protocol has poor BM25 but exact title match should bring it to top
-            let fetchLimit = min(limit * 20, 1000) // Fetch 20x more, max 1000
+            // Fetch significantly more results so title/kind boosts can surface buried gems.
+            // BM25 alone buries canonical type pages whose title carries Apple's
+            // " | Apple Developer Documentation" suffix (e.g. Swift `Task` struct
+            // lands around raw rank 241 for query "Task" because field-length
+            // normalization punishes the diluted title). The post-rank
+            // multipliers can pull such pages to #1, but only if they're in
+            // the candidate set. Floor at 1000 so smart-query fan-out (which
+            // passes limit=10) still over-fetches enough to include them.
+            let fetchLimit = min(max(limit * 20, 1000), 2000)
             sql += " ORDER BY rank LIMIT ?;"
 
             var statement: OpaquePointer?
@@ -2807,14 +2813,29 @@ extension Search {
 
                     // HEURISTIC 1: Short query exact title match (user knows what they want)
                     // "View" searching for "View" protocol = almost certainly what they want.
+                    //
                     // Compare against `titleWithoutSuffix` (boilerplate stripped) so the
                     // ~28% of apple-docs pages whose `<title>` includes the
                     // " | Apple Developer Documentation" suffix still trigger this boost.
                     // Without this, BM25 field-length normalization buries canonical
                     // type pages (`Task`, `View`, `URLSession`) under shorter clean-titled
-                    // siblings (kernel `task_*` C functions, devicemanagement `View`, etc.).
+                    // siblings (kernel `task_*` C functions, devicemanagement `View`,
+                    // foundation `urlprotocol/task` property, etc.).
+                    //
+                    // The suffix itself is a signal: Apple writes
+                    // "<canonical type name> | Apple Developer Documentation" only for
+                    // the parent/landing page of a type. Sub-symbols (properties,
+                    // methods, nested types) get clean titles. Canonical pages still
+                    // lose raw BM25 to clean-titled siblings (their suffix dilutes
+                    // term frequency over field length), so the equal 20x boost here
+                    // wasn't enough to flip the order. Give canonical pages 50x and
+                    // clean-titled pages 20x so the canonical answer wins decisively.
                     if queryWords.count <= 3, titleWithoutSuffix == queryLowerJoined {
-                        boost *= 0.05 // 20x boost - user typed exact name
+                        if titleLower != titleWithoutSuffix {
+                            boost *= 0.02 // 50x boost - canonical Apple-curated page
+                        } else {
+                            boost *= 0.05 // 20x boost - user typed exact name
+                        }
                     }
                     // First word exact match (very strong signal)
                     else if !titleWords.isEmpty, !queryWords.isEmpty, titleWords[0] == queryWords[0] {
@@ -2903,7 +2924,14 @@ extension Search {
             if !symbolMatchURIs.isEmpty {
                 results = results.map { result in
                     if symbolMatchURIs.contains(result.uri) {
-                        // Boost rank for symbol matches (BM25 is negative, lower = better)
+                        // BM25 ranks are negative; lower (more negative) is better.
+                        // To make a symbol match rank better, multiply by a value
+                        // greater than 1 so the result is more negative. The
+                        // previous `* 0.3` made rank LESS negative (demotion),
+                        // which silently hurt canonical apple-docs pages whose
+                        // AST symbols were indexed in `doc_symbols`. Kernel C
+                        // pages have no AST symbols, so they kept their rank
+                        // and won the comparison.
                         return Search.Result(
                             id: result.id,
                             uri: result.uri,
@@ -2913,7 +2941,7 @@ extension Search {
                             summary: result.summary,
                             filePath: result.filePath,
                             wordCount: result.wordCount,
-                            rank: result.rank * 0.3, // 3x boost for symbol matches
+                            rank: result.rank * 3.0, // 3x boost: more-negative rank
                             availability: result.availability
                         )
                     }

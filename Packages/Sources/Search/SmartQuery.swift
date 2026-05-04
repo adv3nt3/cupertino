@@ -40,6 +40,34 @@ extension Search {
             Shared.Constants.SourcePrefix.packages,
         ]
 
+        /// Per-source weights for reciprocal rank fusion (#254 Option B).
+        ///
+        /// Plain RRF gives every source's rank-1 the same fused score
+        /// (1/(k+1) ≈ 0.0164 with k=60), so when two sources both have a
+        /// rank-1 hit they tie and the dictionary-order tiebreak picks
+        /// arbitrarily. For Apple platform queries the user almost always
+        /// wants the canonical apple-docs answer at #1; weighting the
+        /// fused increment by source authority breaks the tie cleanly:
+        ///
+        /// - apple-docs gets 3.0: rank-1 contributes 3.0/61 ≈ 0.0492.
+        /// - swift-evolution / packages get 1.5: rank-1 ≈ 0.0246.
+        /// - apple-archive / hig get 0.5: rank-1 ≈ 0.0082 (kept available
+        ///   for prose fan-out but cannot displace a canonical Apple hit).
+        ///
+        /// Weights are applied to the increment, not the rank; the math is
+        /// still RRF, just authority-weighted.
+        public static let sourceWeights: [String: Double] = [
+            Shared.Constants.SourcePrefix.appleDocs: 3.0,
+            Shared.Constants.SourcePrefix.swiftEvolution: 1.5,
+            Shared.Constants.SourcePrefix.packages: 1.5,
+            Shared.Constants.SourcePrefix.swiftBook: 1.0,
+            Shared.Constants.SourcePrefix.swiftOrg: 1.0,
+            Shared.Constants.SourcePrefix.samples: 1.0,
+            Shared.Constants.SourcePrefix.appleSampleCode: 1.0,
+            Shared.Constants.SourcePrefix.appleArchive: 0.5,
+            Shared.Constants.SourcePrefix.hig: 0.5,
+        ]
+
         private let fetchers: [any CandidateFetcher]
         private let rrfK: Double
 
@@ -132,14 +160,18 @@ extension Search {
                 return collected
             }
 
-            // Reciprocal rank fusion. Candidates are keyed by identifier + source
-            // because cross-source duplicates are vanishingly rare and we want
-            // to preserve both variants if they somehow appear.
+            // Reciprocal rank fusion (authority-weighted, #254 Option B).
+            // Candidates are keyed by identifier + source because cross-source
+            // duplicates are vanishingly rare and we want to preserve both
+            // variants if they somehow appear. The fused increment scales by
+            // `sourceWeights[candidate.source]` so apple-docs' rank-1 hit
+            // beats lower-authority rank-1 hits on the cross-source tiebreak.
             var fused: [String: (candidate: SmartCandidate, score: Double)] = [:]
             for (_, batch) in contributions {
                 for (rank, candidate) in batch.enumerated() {
                     let key = "\(candidate.source)\u{1F}\(candidate.identifier)"
-                    let increment = 1.0 / (rrfK + Double(rank + 1))
+                    let weight = Self.sourceWeights[candidate.source] ?? 1.0
+                    let increment = weight / (rrfK + Double(rank + 1))
                     if let existing = fused[key] {
                         fused[key] = (existing.candidate, existing.score + increment)
                     } else {

@@ -162,6 +162,61 @@ struct SmartQueryIntentRoutingTests {
         #expect(result.contributingSources == [Shared.Constants.SourcePrefix.appleArchive])
     }
 
+    // MARK: - Authority-weighted RRF (#254 Option B)
+
+    @Test("Symbol query with all 3 allowlisted sources tied at rank 1: apple-docs wins fused #1")
+    func appleDocsWinsTieUnderWeightedRRF() async {
+        // Each fetcher returns a single rank-1 candidate. Under unweighted
+        // RRF all three would tie at 1/61 ≈ 0.0164 and dictionary order
+        // would pick arbitrarily. Under #254 weighted RRF apple-docs (3.0)
+        // beats swift-evolution and packages (1.5 each).
+        let recorder = CallRecorder()
+        let smart = Search.SmartQuery(
+            fetchers: makeFetchers(
+                recorder: recorder,
+                sources: [
+                    Shared.Constants.SourcePrefix.appleDocs,
+                    Shared.Constants.SourcePrefix.swiftEvolution,
+                    Shared.Constants.SourcePrefix.packages,
+                ]
+            )
+        )
+
+        let result = await smart.answer(question: "URLSession", limit: 5)
+
+        #expect(result.candidates.first?.candidate.source == Shared.Constants.SourcePrefix.appleDocs)
+        // apple-docs increment 3.0/61 ≈ 0.0492; the next-best (swift-evolution
+        // or packages at 1.5/61 ≈ 0.0246) must score lower.
+        let topScore = result.candidates.first?.score ?? 0
+        let secondScore = result.candidates.dropFirst().first?.score ?? 0
+        #expect(topScore > secondScore)
+    }
+
+    @Test("Prose query: apple-docs still wins ties via authority weighting")
+    func appleDocsWinsProseTie() async {
+        // Authority weighting applies on every fan-out, not just symbol
+        // queries. For prose, when sources tie at rank 1, apple-docs still
+        // wins. apple-archive and hig (weight 0.5) sit below baseline.
+        let recorder = CallRecorder()
+        let smart = Search.SmartQuery(
+            fetchers: makeFetchers(
+                recorder: recorder,
+                sources: [
+                    Shared.Constants.SourcePrefix.appleDocs,
+                    Shared.Constants.SourcePrefix.appleArchive,
+                    Shared.Constants.SourcePrefix.hig,
+                ]
+            )
+        )
+
+        let result = await smart.answer(
+            question: "how do I cancel an async operation",
+            limit: 5
+        )
+
+        #expect(result.candidates.first?.candidate.source == Shared.Constants.SourcePrefix.appleDocs)
+    }
+
     @Test("Symbol query with mixed allowlisted + scoped fetchers keeps the allowlisted ones only")
     func mixedFetcherSetFiltersToAllowlist() async {
         let recorder = CallRecorder()

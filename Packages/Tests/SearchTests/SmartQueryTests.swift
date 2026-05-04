@@ -36,7 +36,6 @@ private func candidate(source: String, id: String, title: String = "t", rawScore
     )
 }
 
-@Suite("Search.SmartQuery (#192 E4)")
 struct SmartQueryTests {
     @Test("Single fetcher: order preserved, scores descend, fetcher listed as contributing")
     func singleFetcher() async {
@@ -57,26 +56,30 @@ struct SmartQueryTests {
         #expect(result.contributingSources == ["packages"])
     }
 
-    @Test("Two fetchers: RRF interleaves top hits")
+    @Test("Two fetchers at equal authority: RRF interleaves top hits")
     func twoFetchersInterleave() async {
+        // Use neutral source names ("a", "b") so neither is in
+        // `SmartQuery.sourceWeights` and both default to weight 1.0; this
+        // test exercises the unweighted RRF math. Cross-source authority
+        // weighting is covered by SmartQueryIntentRoutingTests.
         // With `k=60`, rank-1 from each source gets 1/61 ≈ 0.0164, and they
         // should tie-or-win over rank-2 hits (1/62 ≈ 0.0161). The fused top
         // two results should include one rank-1 hit from each source.
-        let packages = MockFetcher(sourceName: "packages", canned: [
-            candidate(source: "packages", id: "pkg-1"),
-            candidate(source: "packages", id: "pkg-2"),
+        let alpha = MockFetcher(sourceName: "a", canned: [
+            candidate(source: "a", id: "a-1"),
+            candidate(source: "a", id: "a-2"),
         ])
-        let docs = MockFetcher(sourceName: "apple-docs", canned: [
-            candidate(source: "apple-docs", id: "doc-1"),
-            candidate(source: "apple-docs", id: "doc-2"),
+        let beta = MockFetcher(sourceName: "b", canned: [
+            candidate(source: "b", id: "b-1"),
+            candidate(source: "b", id: "b-2"),
         ])
-        let smart = Search.SmartQuery(fetchers: [packages, docs])
+        let smart = Search.SmartQuery(fetchers: [alpha, beta])
 
         let result = await smart.answer(question: "q", limit: 4)
 
         let top2 = Set(result.candidates.prefix(2).map(\.candidate.identifier))
-        #expect(top2 == Set(["pkg-1", "doc-1"]))
-        #expect(Set(result.contributingSources) == Set(["packages", "apple-docs"]))
+        #expect(top2 == Set(["a-1", "b-1"]))
+        #expect(Set(result.contributingSources) == Set(["a", "b"]))
     }
 
     @Test("Failing fetcher is skipped; successful fetcher still contributes")
