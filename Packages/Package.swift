@@ -316,7 +316,7 @@ let targets: [Target] = {
         dependencies: ["ReleaseTool"]
     )
 
-    let testSupportTarget = Target.target(
+    let testSupportTarget = Target.testTarget(
         name: "TestSupport",
         dependencies: []
     )
