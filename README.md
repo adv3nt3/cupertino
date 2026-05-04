@@ -235,7 +235,7 @@ Add to `.vscode/mcp.json` in your workspace:
 
 ### Use with GitHub Copilot for Xcode
 
-[GitHub Copilot for Xcode](https://github.com/github/CopilotForXcode) supports MCP servers via Agent Mode. Open **Settings → MCP Configuration → Edit Config** in the app, or edit `~/.config/github-copilot/xcode/mcp.json` directly:
+[GitHub Copilot for Xcode](https://github.com/github/CopilotForXcode) supports MCP servers via Agent Mode. In the app, go to the **Tools** tab → **MCP** sub-tab → **MCP Configuration** → **Edit Config**, or edit `~/.config/github-copilot/xcode/mcp.json` directly:
 
 ```json
 {
