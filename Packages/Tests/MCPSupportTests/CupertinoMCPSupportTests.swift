@@ -229,6 +229,78 @@ struct DocsResourceProviderPathTraversalTests {
         #expect(textContent.text.contains("View"))
     }
 
+    @Test("apple-docs URI with percent-encoded dots (%2e%2e) does not escape base dir")
+    func appleDocsPercentEncodedDots() async throws {
+        let outputDir = try Self.makeTempRoot("docs-pct-dots-out")
+        let evolutionDir = try Self.makeTempRoot("docs-pct-dots-evo")
+        let archiveDir = try Self.makeTempRoot("docs-pct-dots-arc")
+        defer {
+            try? FileManager.default.removeItem(at: outputDir)
+            try? FileManager.default.removeItem(at: evolutionDir)
+            try? FileManager.default.removeItem(at: archiveDir)
+        }
+
+        let provider = Self.makeProvider(
+            outputDir: outputDir,
+            evolutionDir: evolutionDir,
+            archiveDir: archiveDir
+        )
+
+        // %2e%2e is not ".." literally, so it passes the component validator and is treated
+        // as a filename; the call either throws resourceNotFound or invalidURI — both ToolError.
+        await #expect(throws: ToolError.self) {
+            _ = try await provider.readResource(uri: "apple-docs://swiftui/%2e%2e")
+        }
+    }
+
+    @Test("apple-docs URI with consecutive slashes is rejected at parse time")
+    func appleDocsRejectsDoubleSlash() async throws {
+        let outputDir = try Self.makeTempRoot("docs-dslash-out")
+        let evolutionDir = try Self.makeTempRoot("docs-dslash-evo")
+        let archiveDir = try Self.makeTempRoot("docs-dslash-arc")
+        defer {
+            try? FileManager.default.removeItem(at: outputDir)
+            try? FileManager.default.removeItem(at: evolutionDir)
+            try? FileManager.default.removeItem(at: archiveDir)
+        }
+
+        let provider = Self.makeProvider(
+            outputDir: outputDir,
+            evolutionDir: evolutionDir,
+            archiveDir: archiveDir
+        )
+
+        // "swiftui//foo" produces an empty segment between the slashes; isValidRelativePath
+        // rejects empty segments, so parseAppleDocsURI returns nil → throws ToolError.
+        await #expect(throws: ToolError.self) {
+            _ = try await provider.readResource(uri: "apple-docs://swiftui//foo")
+        }
+    }
+
+    @Test("apple-docs URI with percent-encoded slash (%2F) in path is not a traversal vector")
+    func appleDocsPercentEncodedSlash() async throws {
+        let outputDir = try Self.makeTempRoot("docs-pctslash-out")
+        let evolutionDir = try Self.makeTempRoot("docs-pctslash-evo")
+        let archiveDir = try Self.makeTempRoot("docs-pctslash-arc")
+        defer {
+            try? FileManager.default.removeItem(at: outputDir)
+            try? FileManager.default.removeItem(at: evolutionDir)
+            try? FileManager.default.removeItem(at: archiveDir)
+        }
+
+        let provider = Self.makeProvider(
+            outputDir: outputDir,
+            evolutionDir: evolutionDir,
+            archiveDir: archiveDir
+        )
+
+        // %2F is treated as a literal filename character (no slash in the string),
+        // passes validation, and then fails at file-not-found — never escaping the root.
+        await #expect(throws: ToolError.self) {
+            _ = try await provider.readResource(uri: "apple-docs://swiftui/foo%2Fbar")
+        }
+    }
+
     @Test("evolution proposal lookup with bare 'S' does not match SE-0001")
     func evolutionLookupRequiresBoundary() async throws {
         let outputDir = try Self.makeTempRoot("evo-prefix-out")
