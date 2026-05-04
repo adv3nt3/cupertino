@@ -72,7 +72,7 @@ _The first release we'd call properly stable. Consolidates what was originally s
 
 **Search quality — field-weighted BM25 with AST-extracted symbols (#192 sections C + D, subsumes #176)**
 
-The retrieval technique is **BM25F** (field-weighted BM25, Robertson/Zaragoza/Taylor 2004) over a structured 9-column FTS5 index, augmented with a Swift AST symbol extractor. Public API surface: `Search.SmartQuery` (see "smart-query wrapper" below). Underneath:
+The retrieval technique is **BM25F** (field-weighted BM25, Robertson/Zaragoza/Taylor 2004) over a structured 8-column FTS5 index (`uri`, `source`, `framework`, `language`, `title`, `content`, `summary`, `symbols`), augmented with a Swift AST symbol extractor. Public API surface: `Search.SmartQuery` (see "smart-query wrapper" below). Underneath:
 
 - `Search.DocKind` taxonomy: 10-case enum (`symbolPage`, `article`, `tutorial`, `sampleCode`, `evolutionProposal`, `swiftBook`, `swiftOrgDoc`, `hig`, `archive`, `unknown`) populated at index time by `Search.Classify.kind(source:structuredKind:uriPath:)` — a pure deterministic function. Stored in new `docs_metadata.kind` column.
 - `docs_metadata.symbols` denormalized blob + `docs_fts.symbols` FTS column. Both populated by an AST pass (`SwiftSourceExtractor` over both code-block content AND declaration lines) so a query like `Task` ranks the Swift `Task` struct page above prose mentions of the word "task". The BM25F weight vector is `bm25(docs_fts, 1.0, 1.0, 2.0, 1.0, 10.0, 1.0, 3.0, 5.0)` — title dominates (10×), symbols next (5×), summary (3×), framework (2×).
