@@ -19,9 +19,9 @@ A Swift-based tool to crawl, index, and serve Apple's developer documentation to
 Cupertino is a local, structured, AI-ready documentation system for Apple platforms. It:
 
 - **Crawls** Apple Developer documentation, Swift.org, Swift Evolution proposals, Human Interface Guidelines, Apple Archive legacy guides, and Swift package metadata
-- **Indexes** everything into a fast, searchable SQLite FTS5 database with BM25 ranking
+- **Indexes** everything into a fast, searchable SQLite FTS5 database with field-weighted BM25 (BM25F) ranking and AST-extracted symbol columns
 - **Serves** documentation to AI agents like Claude via the Model Context Protocol
-- **Provides** offline access to 302,424+ documentation pages across 307 frameworks
+- **Provides** offline access to 405,000+ documentation pages across 422 frameworks
 
 ### Why Build This?
 
@@ -38,7 +38,7 @@ Cupertino is a local, structured, AI-ready documentation system for Apple platfo
 ### Requirements
 
 - macOS 15+ (Sequoia)
-- ~2-3 GB disk space for full documentation
+- ~5 GB disk space for the full v1.0 bundle (search.db ~3.4 GB, packages.db ~990 MB, samples.db ~185 MB; ~833 MB compressed for download)
 
 *Building from source additionally requires Swift 6.2+ and Xcode 16.0+*
 
@@ -409,7 +409,7 @@ A UIKit view controller that manages a SwiftUI view hierarchy.
 | Accelerate | 9,114 |
 | SwiftUI | 7,062 |
 | ... | ... |
-| **307 Frameworks** | **302,424** |
+| **422 Frameworks** | **405,782** |
 
 ## Core Features
 
@@ -477,7 +477,7 @@ These catalogs are indexed during `cupertino save` and enable instant search wit
   - Platform availability filtering (iOS/macOS version)
   - Snippet generation
   - Sub-100ms query performance
-- **Size**: ~2.4GB index for full documentation (302,000+ documents across 307 frameworks)
+- **Size**: ~3.4 GB search.db + ~990 MB packages.db + ~185 MB samples.db for full documentation (405,000+ documents across 422 frameworks)
 - **Storage**: Database must be on local filesystem - SQLite does not work reliably on network drives (NFS/SMB)
 
 ### 4. Model Context Protocol Server
@@ -726,7 +726,7 @@ For development setup, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Project Status
 
-**Version:** 0.10.0
+**Version:** 1.0.0 "First Light"
 **Status:** 🚧 Active Development
 
 - ✅ All core functionality working
