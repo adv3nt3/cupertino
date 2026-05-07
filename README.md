@@ -1,6 +1,6 @@
 # 🍎📚 Cupertino
 
-> 🕯️ *v1.0.0 'First Light' released on 2026-05-05.* See the [release notes](https://github.com/mihaelamj/cupertino/releases/tag/v1.0.0).
+> 🕯️ *v1.0.1 released on 2026-05-08.* Three priority-high bug fixes on top of v1.0.0 'First Light'. See the [release notes](https://github.com/mihaelamj/cupertino/releases/tag/v1.0.1).
 
 **Apple Documentation Crawler & MCP Server**
 
@@ -744,8 +744,8 @@ For development setup, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Project Status
 
-**Version:** 1.0.0 "First Light"
-**Status:** ✅ Released 2026-05-05
+**Version:** 1.0.1
+**Status:** ✅ Released 2026-05-08 (binary fixes on v1.0.0 "First Light")
 
 - ✅ All core functionality working
 - ✅ 93 tests passing (100% pass rate)

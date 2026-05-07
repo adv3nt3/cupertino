@@ -220,12 +220,18 @@ enum ServeReaper {
         task.standardError = Pipe()
         do {
             try task.run()
-            task.waitUntilExit()
         } catch {
             return []
         }
-        guard let data = try? pipe.fileHandleForReading.readToEnd(),
-              let output = String(data: data, encoding: .utf8)
+        // Drain stdout BEFORE waitUntilExit. `ps -ax` on a busy machine writes
+        // well over the pipe-buffer ceiling (~64 KB on macOS); if the parent
+        // calls waitUntilExit() first, ps blocks on write() and the parent
+        // blocks on ps exiting, deadlocking `cupertino serve` at startup.
+        // readToEnd() blocks until EOF (ps closing stdout = ps exiting), then
+        // waitUntilExit() returns immediately as a status confirmation.
+        let data = try? pipe.fileHandleForReading.readToEnd()
+        task.waitUntilExit()
+        guard let bytes = data, let output = String(data: bytes, encoding: .utf8)
         else { return [] }
         return parsePsOutput(output)
     }
