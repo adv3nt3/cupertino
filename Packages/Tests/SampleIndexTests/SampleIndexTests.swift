@@ -52,7 +52,6 @@ struct SampleIndexTests {
     }
 }
 
-<<<<<<< HEAD
 // MARK: - #228 phase 2: availability columns on samples.db
 
 @Suite("samples.db availability persistence (#228 phase 2)")
