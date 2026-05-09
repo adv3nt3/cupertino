@@ -13,6 +13,13 @@ jobs:
     name: Build Universal Binary
     runs-on: macos-15
 
+    # Job-level env makes the secret values reachable from step-level
+    # `if:` conditions. Steps that actually use the secrets re-declare
+    # them in their own env block (kept narrow for clarity).
+    env:
+      APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -51,7 +58,15 @@ jobs:
           # Show size
           ls -lh cupertino
 
+      - name: Note Unsigned Build
+        if: env.APPLE_CERTIFICATE_P12 == ''
+        run: |
+          echo "::warning::Apple signing secrets not configured — releasing unsigned binary."
+          echo "Users will hit Gatekeeper warnings on first run; recommend right-click → Open or 'xattr -d com.apple.quarantine'."
+          echo "To enable signing add these repo secrets: APPLE_CERTIFICATE_P12, APPLE_CERTIFICATE_PASSWORD, APPLE_ID, APPLE_ID_PASSWORD, APPLE_TEAM_ID, APPLE_SIGNING_IDENTITY."
+
       - name: Install Certificate
+        if: env.APPLE_CERTIFICATE_P12 != ''
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -76,14 +91,19 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
       - name: Code Sign
+        if: env.APPLE_CERTIFICATE_P12 != ''
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
-          # Sign with Developer ID certificate
-          codesign --force --options runtime --sign "Developer ID Application: Mihaela Mihaljevic Jakic (XBE2EP7T4F)" cupertino
-
-          # Verify signing
+          if [[ -z "$APPLE_SIGNING_IDENTITY" ]]; then
+            echo "::error::APPLE_CERTIFICATE_P12 is set but APPLE_SIGNING_IDENTITY is missing. Add it as a repo secret (e.g. 'Developer ID Application: Your Name (TEAMID)')."
+            exit 1
+          fi
+          codesign --force --options runtime --sign "$APPLE_SIGNING_IDENTITY" cupertino
           codesign -dv --verbose=4 cupertino
 
       - name: Notarize
+        if: env.APPLE_CERTIFICATE_P12 != '' && env.APPLE_ID != ''
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
