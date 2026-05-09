@@ -49,9 +49,9 @@ let allProducts = baseProducts + macOSOnlyProducts
 
 let deps: [Package.Dependency] = [
     // Swift Argument Parser (cross-platform CLI tool)
-    .package(url: "https://github.com/apple/swift-argument-parser", .upToNextMinor(from: "1.7.0")),
+    .package(url: "https://github.com/apple/swift-argument-parser", .upToNextMinor(from: "1.7.1")),
     // SwiftSyntax for AST parsing (#81)
-    .package(url: "https://github.com/swiftlang/swift-syntax", .upToNextMinor(from: "603.0.0")),
+    .package(url: "https://github.com/swiftlang/swift-syntax", .upToNextMinor(from: "603.0.1")),
 ]
 
 // -------------------------------------------------------------
