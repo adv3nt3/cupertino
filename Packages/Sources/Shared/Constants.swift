@@ -181,7 +181,9 @@ extension Shared {
             /// User agent for HTTP requests
             public static let userAgent = "CupertinoCrawler/1.0"
 
-            /// Current version
+            /// Current version. Fork build aligned with upstream v1.0.1; fork-side
+            /// security hardening + rebrand is layered on top. Bump to 1.1.0-adv3nt3
+            /// the next time we cut a fork-only release.
             public static let version = "1.0.1"
 
             /// Database version - separate from CLI version, only bump when schema/content changes.
