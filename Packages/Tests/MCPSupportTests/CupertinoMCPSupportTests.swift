@@ -3,7 +3,7 @@ import Foundation
 @testable import Shared
 import Testing
 
-@Test func cupertinoMCPSupport() async throws {
+@Test func cupertinoMCPSupport() {
     // Test placeholder
 }
 

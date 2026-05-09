@@ -27,7 +27,7 @@ struct ServeCommand: AsyncParsableCommand {
         • list_frameworks - List available frameworks with document counts
         • read_document - Read full document content by URI
 
-        Sample Code Tools (requires 'cupertino index'):
+        Sample Code Tools (requires 'cupertino save --samples'):
         • search_samples - Search sample code projects and files
         • list_samples - List all indexed sample projects
         • read_sample - Read sample project README
@@ -38,6 +38,12 @@ struct ServeCommand: AsyncParsableCommand {
     )
 
     mutating func run() async throws {
+        // Reap any sibling `cupertino serve` processes of the same binary
+        // before we bind stdio. MCP host config reloads (Claude Desktop,
+        // Cursor, etc.) leave orphan servers behind otherwise — they pin
+        // SQLite read locks and stack RAM usage. (#242)
+        ServeReaper.reapSiblings()
+
         if isatty(STDOUT_FILENO) == 0 {
             Log.disableConsole()
         }
@@ -63,7 +69,18 @@ struct ServeCommand: AsyncParsableCommand {
             throw ExitCode.failure
         }
 
-        let server = MCPServer(name: Shared.Constants.App.mcpServerName, version: Shared.Constants.App.version)
+        // Advertise the embedded cupertino icon to MCP clients that speak
+        // the 2025-11-25 protocol. Older clients ignore the field.
+        let icon = Icon(
+            src: CupertinoIconEmbedded.dataURI,
+            mimeType: "image/png",
+            sizes: ["64x64"]
+        )
+        let server = MCPServer(
+            name: Shared.Constants.App.mcpServerName,
+            version: Shared.Constants.App.version,
+            icons: [icon]
+        )
 
         await registerProviders(
             server: server,
@@ -130,8 +147,7 @@ struct ServeCommand: AsyncParsableCommand {
         }
 
         do {
-            let sampleIndex = try await SampleIndex.Database(dbPath: sampleDBURL)
-            return sampleIndex
+            return try await SampleIndex.Database(dbPath: sampleDBURL)
         } catch {
             let errorMsg = "⚠️  Failed to load sample index: \(error)"
             let cmd = "\(Shared.Constants.App.commandName) index"
@@ -151,8 +167,7 @@ struct ServeCommand: AsyncParsableCommand {
         }
 
         do {
-            let searchIndex = try await Search.Index(dbPath: searchDBURL)
-            return searchIndex
+            return try await Search.Index(dbPath: searchDBURL)
         } catch {
             let errorMsg = "⚠️  Failed to load search index: \(error)"
             let cmd = "\(Shared.Constants.App.commandName) save"
@@ -222,7 +237,7 @@ struct ServeCommand: AsyncParsableCommand {
           $ \(cmd) fetch --type packages
 
         ⏱️  Crawling takes 10-30 minutes depending on content type.
-           You can resume if interrupted with --resume flag.
+           If interrupted, just re-run the same command — fetch resumes by default.
 
         🔍 STEP 2: Build Search Index
         ───────────────────────────────────────────────────────────────────────────

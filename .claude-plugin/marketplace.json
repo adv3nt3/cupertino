@@ -15,7 +15,7 @@
         "name": "adv3nt3",
         "url": "https://github.com/adv3nt3"
       },
-      "source": ".",
+      "source": "./",
       "category": "development",
       "homepage": "https://github.com/adv3nt3/cupertino"
     }
