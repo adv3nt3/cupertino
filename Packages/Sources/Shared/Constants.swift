@@ -181,10 +181,13 @@ extension Shared {
             /// User agent for HTTP requests
             public static let userAgent = "CupertinoCrawler/1.0"
 
-            /// Current version. Fork build aligned with upstream v1.0.1; fork-side
-            /// security hardening + rebrand is layered on top. Bump to 1.1.0-adv3nt3
-            /// the next time we cut a fork-only release.
-            public static let version = "1.0.1"
+            /// Current version. Fork build aligned with upstream v1.0.1, with
+            /// fork-side security hardening + rebrand layered on top. Pre-release
+            /// suffix `-adv3nt3.1` flags this as the first fork-tagged release
+            /// after sync to upstream v1.0.1. Future fork cuts increment the
+            /// suffix counter (.2, .3, …); the next sync to a new upstream
+            /// release resets the base + suffix counter.
+            public static let version = "1.1.0-adv3nt3.1"
 
             /// Database version - separate from CLI version, only bump when schema/content changes.
             /// Controls the cupertino-docs release tag that `cupertino setup` downloads from.
